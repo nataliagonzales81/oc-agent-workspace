@@ -101,6 +101,12 @@ type command struct {
 	setup   func(fs *flag.FlagSet, c *Context)
 	run     func(c *Context, args []string) envelope.Result
 	human   humanFunc
+	// takesArgs lets a command receive positional arguments. The default is to
+	// refuse them, because for most commands an unexpected argument is a caller
+	// mistake and a silent no-op is the worst possible response. A command that
+	// dispatches on its own arguments opts in and is then responsible for
+	// rejecting anything it does not recognise.
+	takesArgs bool
 	// humanOnError prints the human rendering even when the envelope is not ok.
 	//
 	// Most commands keep stdout empty on failure so a script piping stdout gets
@@ -116,6 +122,7 @@ type command struct {
 
 var commands = []*command{
 	versionCommand,
+	taskCommand,
 	initCommand,
 	doctorCommand,
 }
@@ -271,16 +278,21 @@ func dispatch(ctx *Context, cmd *command, args []string, stdoutTTY bool) int {
 		}, cmd)
 	}
 
-	if extra := cfs.Args(); len(extra) > 0 {
-		return emit(ctx, mode, envelope.Result{
-			Command: cmd.name,
-			Err: envelope.Errorf(
-				envelope.CodeUsage,
-				cmd.usage,
-				"unexpected argument %q",
-				extra[0],
-			),
-		}, cmd)
+	// flag.Parse stops at the first non-flag argument, so a command that takes
+	// arguments gets them all here, flags and subcommand name included, and
+	// parses its own.
+	if !cmd.takesArgs {
+		if extra := cfs.Args(); len(extra) > 0 {
+			return emit(ctx, mode, envelope.Result{
+				Command: cmd.name,
+				Err: envelope.Errorf(
+					envelope.CodeUsage,
+					cmd.usage,
+					"unexpected argument %q",
+					extra[0],
+				),
+			}, cmd)
+		}
 	}
 
 	ctx.Mode = ResolveMode(ctx.Options, stdoutTTY)

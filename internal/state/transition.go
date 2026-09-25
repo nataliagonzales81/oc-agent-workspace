@@ -115,6 +115,15 @@ func (s *State) AddTask(t Task, now time.Time) *Error {
 	if err := proposed.refuseIfIncomplete(t.ID); err != nil {
 		return err
 	}
+	// refuseIfIncomplete covers the checks whose message is worth naming a task
+	// for. Validate is the backstop, because AddTask is the one mutation that can
+	// introduce a status directly: `add --status in_progress` on a task with
+	// unmet deps is invariant 4, and without this it would sail through here and
+	// be caught by Save, which reports it as a write failure — the wrong code and
+	// the wrong exit class for what is a transition refusal.
+	if err := proposed.Validate(); err != nil {
+		return err
+	}
 	s.Tasks = proposed.Tasks
 	return nil
 }
@@ -211,12 +220,16 @@ func (s *State) refuseIfDependentsInFlight(id string, to Status) *Error {
 		return nil
 	}
 	sort.Strings(inFlight)
+	// The message names the task being parked and the dependents that are
+	// working from it, in that order. Saying "task X is in progress" when X is
+	// the one being parked is the kind of message that sends a reader to the
+	// wrong task.
 	return newError(
 		envelope.CodeInvalidTransition,
-		"ocaw task set "+id+" --status "+string(StatusDone),
+		"ocaw task set "+strings.Join(inFlight, " ")+" --status done",
 		Detail{Task: id, To: string(to), Blocking: inFlight},
-		"task %q is in progress and %s started on it; finish it, or cancel it",
-		id, plural(len(inFlight), "task", "tasks"),
+		"task %q cannot go back to %s: %s %s already in progress on it",
+		id, to, plural(len(inFlight), "task", "tasks"), strings.Join(inFlight, ", "),
 	)
 }
 

@@ -549,8 +549,10 @@ command an agent runs first to orient, and must be cheap — no subprocesses, no
 ### `ocaw task`
 
 ```
-ocaw task add --id <id> --title <s> [--agent <s>] [--tier <s>] [--dep <id>...]
+ocaw task add --id <id> --title <s> [--agent <s>] [--tier <s>] [--status <s>] [--note <s>]
+              [--dep <id>...] [--gate <name>=<command>]...
 ocaw task set <id> [--title <s>] [--agent <s>] [--tier <s>] [--status <s>] [--note <s>]
+                  [--gate <name>=<command>]...
 ocaw task dep <id> --add <id>... | --rm <id>...
 ocaw task rm <id>...
 ocaw task show <id>
@@ -558,14 +560,60 @@ ocaw task list [--status <s>] [--ready] [--blocked]
 ocaw task next          # highest-priority ready task, or null
 ```
 
-- `add` is upsert by `--id` (§4.4). `--status in_progress` on a task with unmet deps is
-  rejected: error `deps_unmet`, `data.ready` lists what is blocking.
-- `status` accepts only `pending|in_progress|done|blocked|cancelled`.
+Flags may appear before, between, or after the task id. Go's `flag` stops at the first
+positional, so `ocaw task set 1 --status done` would otherwise read `--status` as a
+positional, ignore it, and report that nothing was changed — a silent no-op on the most
+important flag in the command.
+
+- `add` is upsert by `--id` (§4.4); fields it was not given are preserved, and `data.created`
+  says which happened.
+- `--status in_progress` on a task with unmet deps is rejected: error `deps_unmet`, exit 5,
+  and `data.detail.blocking` names the deps. The refusal covers `add` as well as `set`, and
+  the whole `add` is refused — a task is not created and then left in a state the rules
+  forbid.
+- `status` accepts only `pending|in_progress|done|blocked|cancelled`. An omitted `--status`
+  on `add` means pending.
 - Transitions are validated: `done → in_progress` requires `--yes` (it invalidates gates);
-  `cancelled → done` is rejected outright.
+  `cancelled → done` is rejected outright, `--yes` or not; a task with a dependent in
+  progress may not go back to `pending` or `blocked`.
 - `next` returns `data.task: null` and `ok: true` when nothing is ready — an empty queue is
   a valid, non-error state.
-- Exit `0` · `2` usage · `5` transition or invariant violation · `7` task not found.
+- `rm` is idempotent: an id that is not there is echoed in `data.removed` and ignored, so
+  removing a batch fails on nothing. `RemoveTask` itself stays strict, because a caller that
+  passes a typo should hear about it; idempotence is a decision about what a human typed.
+- `dep` applies `--add` then `--rm`, so a dep that is both ends up removed, which is what the
+  flags read as.
+- `list` filters by `--status`, `--ready`, or `--blocked` — never two at once — and always
+  reports the unfiltered ready queue, so a caller asking for the blocked list still learns
+  what is runnable.
+- Exit `0` · `2` usage · `3` no workspace · `4` a gate command that is not a runnable argv ·
+  `5` transition or invariant violation · `6` lock held · `7` task not found.
+
+`--gate <name>=<command>` is not in the original usage lines, but something has to define
+gates: the state model stores them, `ocaw verify` needs something to run, and nothing else
+in v1 could. The syntax is a name, an explicit `=`, and a command — the same shape as a
+dependency edge, so it reads like the rest of the command. The command is checked with
+`verify.Tokenize` at the moment it is written, not at verify time: a gate ocaw cannot run
+should be refused while the author is still thinking about it.
+
+A mutating subcommand takes the single-writer lock, **including under `--dry-run`**. A dry
+run reporting a verdict about a state another agent is halfway through changing is
+reporting fiction, so it waits for nothing and fails with `lock_held` instead. Read-only
+subcommands (`show`, `list`, `next`) take no lock at all.
+
+Every mutation refreshes `WORKFLOW_STATE.md` from the state it just wrote. Leaving it behind
+would make `doctor` report staleness as the normal outcome of doing work, and a check that
+fires on success trains people to ignore it. `ocaw report --write` stays meaningful for
+what a mutation cannot cover: a hand-edited file, a deleted one, one written out of band.
+
+`data` is the same shape for all seven subcommands — `subcommand`, `task`, `tasks`,
+`removed`, `counts`, `ready`, `blocked`, `created`, `dry_run`, `detail` — with every key
+always present and every list an array. A caller should not have to know which subcommand it
+ran before it can check whether `task` is null, and a field that appears in one subcommand
+and not another is a field guarded twice. `detail` carries the structured half of a
+refusal: the blocking dep ids, the cycle path, the dependent that would be stranded. An
+agent that has to read the message to find out what is in its way is back to parsing prose,
+which is the one thing the JSON contract exists to prevent.
 
 ### `ocaw verify`
 
