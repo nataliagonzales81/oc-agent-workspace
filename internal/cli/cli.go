@@ -101,11 +101,23 @@ type command struct {
 	setup   func(fs *flag.FlagSet, c *Context)
 	run     func(c *Context, args []string) envelope.Result
 	human   humanFunc
+	// humanOnError prints the human rendering even when the envelope is not ok.
+	//
+	// Most commands keep stdout empty on failure so a script piping stdout gets
+	// nothing rather than a half-formed report, and the error goes to stderr.
+	// doctor is the exception, and deliberately so: exit 4 there means the
+	// workspace is unhealthy, not that doctor broke. Its human output IS the
+	// findings, and a human who runs it on a broken workspace must see them.
+	// The findings still travel in data, so this changes nothing for a JSON
+	// caller; it only stops the terminal from showing a one-line summary of a
+	// dozen problems.
+	humanOnError bool
 }
 
 var commands = []*command{
 	versionCommand,
 	initCommand,
+	doctorCommand,
 }
 
 func commandByName(name string) *command {
@@ -168,7 +180,7 @@ func run(ctx *Context, argv []string, stdoutTTY bool) int {
 		return emit(ctx, mode, envelope.Result{
 			Command: "ocaw",
 			Err:     envelope.NewError(envelope.CodeUsage, err.Error(), "ocaw --help"),
-		}, nil)
+		}, ocawRootCommand)
 	}
 
 	args := fs.Args()
@@ -181,6 +193,7 @@ func run(ctx *Context, argv []string, stdoutTTY bool) int {
 	}
 
 	ctx.Options = opts
+	ctx.Dir = opts.Dir
 	mode := ResolveMode(opts, stdoutTTY)
 	ctx.Mode = mode
 
@@ -220,6 +233,14 @@ func absorbTrailingGlobals(o Options, args []string) Options {
 	return o
 }
 
+// ocawRootCommand is the pseudo-command behind a caller mistake: no command
+// name, or one that does not exist. It has no flags and its human rendering is
+// the error line.
+var ocawRootCommand = &command{
+	name:  "ocaw",
+	human: humanAvailableCommands,
+}
+
 // emitUsage reports a caller mistake. In human mode the help is the most
 // useful thing on the terminal, so it goes to stdout alongside the error on
 // stderr; in JSON mode the envelope is the whole answer.
@@ -229,7 +250,7 @@ func emitUsage(ctx *Context, mode Mode, res envelope.Result) int {
 			return reportInternal(ctx, err)
 		}
 	}
-	return emit(ctx, mode, res, humanAvailableCommands)
+	return emit(ctx, mode, res, ocawRootCommand)
 }
 
 func dispatch(ctx *Context, cmd *command, args []string, stdoutTTY bool) int {
@@ -247,7 +268,7 @@ func dispatch(ctx *Context, cmd *command, args []string, stdoutTTY bool) int {
 		return emit(ctx, mode, envelope.Result{
 			Command: cmd.name,
 			Err:     envelope.NewError(envelope.CodeUsage, err.Error(), "ocaw "+cmd.name+" --help"),
-		}, cmd.human)
+		}, cmd)
 	}
 
 	if extra := cfs.Args(); len(extra) > 0 {
@@ -259,11 +280,11 @@ func dispatch(ctx *Context, cmd *command, args []string, stdoutTTY bool) int {
 				"unexpected argument %q",
 				extra[0],
 			),
-		}, cmd.human)
+		}, cmd)
 	}
 
 	ctx.Mode = ResolveMode(ctx.Options, stdoutTTY)
-	return emit(ctx, ctx.Mode, cmd.run(ctx, cfs.Args()), cmd.human)
+	return emit(ctx, ctx.Mode, cmd.run(ctx, cfs.Args()), cmd)
 }
 
 func suggestCommand(name string) string {
@@ -490,8 +511,15 @@ func renderDiagnostics(env envelope.Envelope) string {
 	return b.String()
 }
 
-func emit(ctx *Context, mode Mode, res envelope.Result, human humanFunc) int {
+func emit(ctx *Context, mode Mode, res envelope.Result, cmd *command) int {
 	env := res.Envelope()
+	var (
+		human        humanFunc
+		humanOnError bool
+	)
+	if cmd != nil {
+		human, humanOnError = cmd.human, cmd.humanOnError
+	}
 
 	var payload []byte
 	toStdout := true
@@ -504,13 +532,16 @@ func emit(ctx *Context, mode Mode, res envelope.Result, human humanFunc) int {
 		}
 		payload = raw
 	case ModeHuman:
-		if env.OK {
+		if env.OK || humanOnError {
 			raw, err := renderHuman(ctx, env, human)
 			if err != nil {
 				return reportInternal(ctx, err)
 			}
 			payload = raw
 		} else {
+			// Nothing was rendered, so stdout stays empty and the error goes to
+			// stderr alone. A script piping stdout gets nothing rather than a
+			// half-formed report.
 			toStdout = false
 		}
 	case ModeQuiet:

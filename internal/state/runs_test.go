@@ -1,6 +1,7 @@
 package state
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -213,10 +214,10 @@ func TestStuckTasksReducesToTaskIDs(t *testing.T) {
 	}
 }
 
+// asEnvelope recovers the wire error from whatever a state-layer call returned.
+// It uses errors.As rather than a type assertion because a state error wraps an
+// envelope error: Load can return either shape depending on which layer failed,
+// and a caller that only knows the wire contract should not need a type switch.
 func asEnvelope(err error, dst **envelope.Error) bool {
-	e, ok := err.(*envelope.Error)
-	if ok {
-		*dst = e
-	}
-	return ok
+	return errors.As(err, dst)
 }

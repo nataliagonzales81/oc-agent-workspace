@@ -236,9 +236,9 @@ func TestInvariantGatesAreRunnableCommands(t *testing.T) {
 	}
 }
 
-// §9.4 makes argv, not a shell, the execution model, so a shell operator left in
-// a gate is a command that could not be honoured. Quoting does not defeat the
-// rule: ocaw tokenises the string itself.
+// §9.4 makes argv, not a shell, the execution model, so an unquoted shell
+// operator in a gate is a command ocaw cannot honour. Refusing it says so,
+// rather than quietly running the first half of what the author wrote.
 func TestInvariantGatesRefuseShellOperators(t *testing.T) {
 	for _, cmd := range []string{
 		"go test ./... && go vet ./...",
@@ -249,7 +249,8 @@ func TestInvariantGatesRefuseShellOperators(t *testing.T) {
 		"go run $(cat go.mod)",
 		"go test `id`",
 		"go build ./... &",
-		`go test "a && b"`,
+		"go test ./...\ngo vet ./...",
+		"go test ./...\t&& echo",
 	} {
 		s := New()
 		s.Tasks = []Task{{
@@ -267,7 +268,8 @@ func TestInvariantGatesRefuseShellOperators(t *testing.T) {
 }
 
 // The negative half: a gate that merely looks dangerous must still pass, or the
-// rule becomes "refuse anything with a special character".
+// rule becomes "refuse anything with a special character" and people start
+// avoiding the tool.
 func TestInvariantGateCommandsWithSafePunctuationPass(t *testing.T) {
 	for _, cmd := range []string{
 		"go test ./...",
@@ -277,6 +279,13 @@ func TestInvariantGateCommandsWithSafePunctuationPass(t *testing.T) {
 		"cargo test --all-features",
 		"make check",
 		"./scripts/verify.sh --strict",
+		// A shell operator inside quotes is literal text: ocaw calls exec
+		// directly, so there is no shell here to give `&&` any meaning. Refusing
+		// these would make an ordinary test selection inexpressible, and the
+		// rule that protects the user is the unquoted one above.
+		`go test -run 'TestA && TestB' ./...`,
+		`go test -run 'TestSub|^other$' ./...`,
+		`pytest -k "slow or flaky"`,
 	} {
 		s := New()
 		s.Tasks = []Task{{

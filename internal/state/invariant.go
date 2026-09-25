@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/nataliagonzales81/oc-agent-workspace/internal/envelope"
+	"github.com/nataliagonzales81/oc-agent-workspace/internal/verify"
 )
 
 // The named checks. doctor reports them by name so an agent can tell "this
@@ -339,13 +340,17 @@ func (s *State) checkGates() *Error {
 					"task %q gate %q has an empty cmd", t.ID, g.Name,
 				)
 			}
-			if op := shellOperator(g.Cmd); op != "" {
+			// The same parser verify will use to run it, so a command ocaw
+			// accepts here is one it can actually run, and one it refuses here
+			// is one it refuses to run too. Two parsers for one format means a
+			// user finds out which by trying.
+			if _, terr := verify.Tokenize(g.Cmd); terr != nil {
 				return newError(
 					envelope.CodeValidationFailed,
 					"split the command into separate gates",
 					Detail{Task: t.ID, Gate: g.Name, Check: CheckGates},
-					"task %q gate %q contains the shell operator %q; ocaw runs argv, not a shell (SPEC §9.4)",
-					t.ID, g.Name, op,
+					"task %q gate %q is not a runnable argv: %v (SPEC §9.4)",
+					t.ID, g.Name, terr,
 				)
 			}
 		}
@@ -379,21 +384,7 @@ func (s *State) checkAcceptance() *Error {
 	return nil
 }
 
-// shellOperators are the characters that would make a command mean something
-// other than itself if it were ever handed to a shell. Quoting is not an escape
-// here: ocaw tokenises the command itself, so a quoted "&&" is still refused and
-// the rule cannot be defeated by writing `"go test" && "go vet"`.
-var shellOperators = []string{"&&", "||", "|", ";", "`", "$(", ">", ">>", "<", "&"}
-
 // shellOperator returns the first operator found in cmd, or "".
-func shellOperator(cmd string) string {
-	for _, op := range shellOperators {
-		if strings.Contains(cmd, op) {
-			return op
-		}
-	}
-	return ""
-}
 
 // UnmetDeps returns the deps of a task that are not done or cancelled, in the
 // order the task lists them. It is the single answer to "what is blocking this",

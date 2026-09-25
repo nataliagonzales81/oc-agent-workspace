@@ -35,21 +35,14 @@ func Load(l *workspace.Layout) (*State, error) {
 		return nil, err
 	}
 
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.DisallowUnknownFields()
-	var s State
-	if err := dec.Decode(&s); err != nil {
-		return nil, envelope.Errorf(
-			envelope.CodeValidationFailed,
-			"repair state.json by hand, or re-run ocaw init",
-			"cannot read state.json: %v", err,
-		)
+	st, derr := Decode(raw)
+	if derr != nil {
+		return nil, derr
 	}
-	s.normalise()
-	if verr := s.Validate(); verr != nil {
+	if verr := st.Validate(); verr != nil {
 		return nil, verr
 	}
-	return &s, nil
+	return st, nil
 }
 
 // Save writes state.json atomically and refuses to write a state that would fail
@@ -131,4 +124,29 @@ func AppendRun(l *workspace.Layout, run Run) error {
 		return err
 	}
 	return workspace.AppendLine(l.RunsJSONL(), string(line))
+}
+
+// Decode reads a state document without validating its invariants.
+//
+// It is separate from Load because the two callers want opposite behaviour. A
+// command that is about to write needs the first violation and nothing else —
+// it is going to refuse, and a list would be noise. doctor needs all of them,
+// because a health check that reports one problem per run is a health check an
+// agent has to run seven times.
+//
+// Unknown fields are refused here, for the same reason Load refuses them.
+func Decode(raw []byte) (*State, *Error) {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	var s State
+	if err := dec.Decode(&s); err != nil {
+		return nil, newError(
+			envelope.CodeValidationFailed,
+			"repair state.json by hand, or re-run ocaw init",
+			Detail{},
+			"cannot read state.json: %v", err,
+		)
+	}
+	s.normalise()
+	return &s, nil
 }

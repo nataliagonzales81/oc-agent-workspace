@@ -86,6 +86,18 @@ func (e *Error) Envelope() *envelope.Error {
 	return e.Err
 }
 
+// Unwrap lets errors.As find the envelope error inside a state error, so a
+// caller that only knows the wire contract can recover it with one line. Without
+// it, Load would return two different error types from two different paths —
+// an *envelope.Error for a missing file and a *state.Error for a malformed one —
+// and every caller would need a type switch to handle both.
+func (e *Error) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
 // Data returns the detail for envelope.data, or nil when there is nothing to add
 // beyond the message.
 func (e *Error) Data() any {

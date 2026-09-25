@@ -311,10 +311,21 @@ reaching a state the fourth rule would then refuse to load:
 - `task rm` refuses to delete a task that others depend on. A task named in the same
   call does not count, so a chain can be removed from the leaves in one command.
 
-The `gates[].cmd` rule is read as "no shell operators at all", not "at most one
-`&&`". ocaw executes argv and never a shell (§9.4), so a `&&`, `|`, `;`, backtick or
-redirection left in a gate is a command that could not be honoured as written. Quoting
-is not an escape: ocaw tokenises the command itself.
+A `gates[].cmd` is tokenised by the same parser `ocaw verify` runs it with
+(`internal/verify.Tokenize`), so a command accepted on write is one ocaw can
+actually run. An **unquoted** `&&`, `||`, `|`, `;`, `<`, `>`, `(`, `)`, `$`,
+backtick, or backslash is refused: ocaw calls `exec` directly and never a shell
+(§9.4), so one of those is someone writing a command for a shell that is not
+there, and refusing it says so instead of quietly running the first half.
+
+Inside quotes the same characters are inert literal text and are allowed, because
+there is no shell here to give them meaning. `-run 'TestA && TestB'` and
+`-run 'TestSub|^other$'` are ordinary test selections, and a rule that refused
+them would make real commands inexpressible. There are no escapes either: a
+backslash is refused rather than passed through, so a command's meaning never
+depends on which of the two quoting styles the author reached for. A command
+spanning a line break is refused too — a one-line config field holding two lines
+is a paste accident, not a command.
 
 `state.json` is decoded with unknown fields refused. A field this build does not know
 is a field the next save would delete, and the loss would be silent — the same rule §9.1
@@ -478,11 +489,52 @@ still parses. Emits every finding, not just the first.
 ```
 
 - `severity` is `error` | `warning` | `info`.
-- `--strict` promotes warnings to errors (for CI).
+- `--strict` promotes warnings to errors (for CI). It changes the exit code and nothing
+  else: the same findings are found either way, so a report is comparable across runs.
 - `--fix-safe` applies only reversible fixes: create missing empty directories, regenerate
   a stale `WORKFLOW_STATE.md`, drop knowledge entries whose `anchor` no longer exists
   (reported, never silent). It does **not** touch task data, skills, or `agent.yaml`.
 - Exit `0` no errors · `4` errors found.
+
+Each finding also carries `check` (one of `layout`, `agent_yaml`, `state`, `render`,
+`skills`, `knowledge`, `verify_cmd`), `location` (repo-relative), and a `hint` naming the
+command that fixes it. A caller pins behaviour to `check` and branches on `code`; both
+are stable, and neither is the message text.
+
+Three things about the exit code:
+
+- **It describes what the pass found, not what it left behind.** A run that reports drift
+  and then repairs it under `--fix-safe` still exits 4, because the `findings` it carries
+  and its exit code describe the same moment. Re-checking after every fix would mean a
+  caller reading `findings` and a caller reading the exit code are looking at different
+  states. The hint says what happened and what to run next; the confirming run is a
+  second `ocaw doctor`.
+- **Findings travel in `data`, not in `error`.** Several unrelated things can be wrong and
+  there is no one error to report, so `error` carries only a summary — enough that
+  `ok:false` and a non-zero exit can never appear without an explanation.
+- **Nothing is executed.** A health check that runs the test suite is one nobody calls in
+  a loop. The recorded `verify_cmd` is tokenised, and its program looked up on `PATH`; a
+  program that is not installed is a `verify_cmd_stale` *warning*, because §5.1 says so —
+  the project may have moved to another runner and ocaw must not second-guess the human
+  into re-running detection.
+
+`doctor` is the one command that must work on a workspace that is already broken, so it
+does not use `Require()`: a missing `.agent/` is a finding, not a reason to stop. It takes
+no lock, and `--fix-safe` takes one only when it has something to write — a read-only
+check that fails with `lock_held` reports the wrong problem.
+
+What `--fix-safe` deliberately does not do, and why:
+
+| Not fixed | Why |
+|---|---|
+| task data | a broken DAG is work in progress; the fix is a person deciding what it should be |
+| skills | a skill is a human's document; refusing to parse one is a finding to report, not a file to correct |
+| `agent.yaml` | a project that moved to another test runner has a *correct* `verify_cmd` that ocaw would overwrite with its own guess |
+
+In human mode doctor prints its findings to stdout even though the envelope is not ok,
+because for this command a non-zero exit is a verdict about the workspace rather than a
+failure of the command, and the findings are the entire point of running it. Every other
+command keeps stdout empty on failure.
 
 ### `ocaw status`
 
