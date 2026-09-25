@@ -123,6 +123,7 @@ type command struct {
 var commands = []*command{
 	versionCommand,
 	taskCommand,
+	verifyCommand,
 	initCommand,
 	doctorCommand,
 }

@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 
 	"github.com/nataliagonzales81/oc-agent-workspace/internal/envelope"
+	"github.com/nataliagonzales81/oc-agent-workspace/internal/verify"
 )
 
 // StateSchema is the schema id written into every state.json.
@@ -61,13 +62,19 @@ func (s Status) SatisfiesDep() bool { return s.Terminal() }
 // GateStatus is a verification gate's outcome. It is a separate vocabulary from
 // Status because "cancelled" and "blocked" describe scheduling, while gates
 // only ever pass, fail, or time out.
+//
+// The three run outcomes are aliases of the values internal/verify produces
+// rather than literals written here. internal/state already depends on
+// internal/verify for Tokenize, so the dependency runs one way; defining the
+// vocabulary in both places would leave two definitions to keep in step, and the
+// step people forget is the one that makes a recorded run unreadable.
 type GateStatus string
 
 const (
 	GatePending GateStatus = "pending"
-	GatePass    GateStatus = "pass"
-	GateFail    GateStatus = "fail"
-	GateTimeout GateStatus = "timeout"
+	GatePass    GateStatus = GateStatus(verify.Pass)
+	GateFail    GateStatus = GateStatus(verify.Fail)
+	GateTimeout GateStatus = GateStatus(verify.Timeout)
 )
 
 // GateStatuses is the closed gate vocabulary, sorted.
