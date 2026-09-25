@@ -268,6 +268,25 @@ func TestErrorf(t *testing.T) {
 // *Error must satisfy error so a package can return it from a helper without
 // losing the code. The rendering is what reaches a human on stderr, so it is
 // pinned: code and message, never the hint, which lives in its own field.
+// NewError takes (code, message, hint) and Errorf takes (code, hint, format).
+// The asymmetry is deliberate and documented, but it is also the easiest mistake
+// in this package to make, so it is pinned here: the two must land the hint in
+// the same field and the message in the same field.
+func TestConstructorsAgreeOnArgumentOrder(t *testing.T) {
+	literal := NewError(CodeUsage, "the message", "the hint")
+	formatted := Errorf(CodeUsage, "the hint", "the %s", "message")
+
+	if literal.Message != formatted.Message || literal.Hint != formatted.Hint || literal.Code != formatted.Code {
+		t.Errorf("NewError = %+v, Errorf = %+v; the two disagree on which field is the hint", literal, formatted)
+	}
+	if literal.Message != "the message" {
+		t.Errorf("Message = %q", literal.Message)
+	}
+	if literal.Hint != "the hint" {
+		t.Errorf("Hint = %q", literal.Hint)
+	}
+}
+
 func TestErrorSatisfiesError(t *testing.T) {
 	var err error = NewError(CodeLockHeld, "the workspace lock is held by pid 42 on host h since 2026-09-25T00:00:00Z", "retry later")
 	if got := err.Error(); got != "lock_held: the workspace lock is held by pid 42 on host h since 2026-09-25T00:00:00Z" {

@@ -302,6 +302,24 @@ Invariants, all checked by `doctor`:
 - Every `gates[].cmd` must be non-empty and must not contain an unescaped `&&` chain
   longer than one stage (see §8, "no shell injection by convenience").
 
+Two consequences of the fourth rule are enforced with it, because each is a way of
+reaching a state the fourth rule would then refuse to load:
+
+- A task may not be `pending` or `blocked` while a dependent is `in_progress`. The
+  dependent started because this task was done, cancelled, or under way; parking it
+  withdraws that. `ocaw task set` refuses the move with the dependent named.
+- `task rm` refuses to delete a task that others depend on. A task named in the same
+  call does not count, so a chain can be removed from the leaves in one command.
+
+The `gates[].cmd` rule is read as "no shell operators at all", not "at most one
+`&&`". ocaw executes argv and never a shell (§9.4), so a `&&`, `|`, `;`, backtick or
+redirection left in a gate is a command that could not be honoured as written. Quoting
+is not an escape: ocaw tokenises the command itself.
+
+`state.json` is decoded with unknown fields refused. A field this build does not know
+is a field the next save would delete, and the loss would be silent — the same rule §9.1
+states for YAML.
+
 ### 6.2 `WORKFLOW_STATE.md` — generated view
 
 Rendered from `state.json` with these sections, in this order:
@@ -333,6 +351,18 @@ The `## Request` … `## Acceptance Criteria` sections are authored by the agent
 `## Workflow DAG` is fully derived. A hand-edit to a derived section is detected by
 `doctor` (hash mismatch against the stored `rendered_sha256`) and reported as an error
 with hint `ocaw report --write`.
+
+`runs.jsonl` is one JSON object per line, appended and never rewritten. Each record
+carries the task, the gate, the argv that ran, the status, the exit code, the
+timestamp, the output, and the SHA-256 of the **full** output. Stored output is
+capped at 8 KiB with a truncation marker, while the hash covers the whole thing — so
+two failures that share a truncated prefix still compare honestly. A malformed line
+is an error naming the line number, never a skipped record: dropping it would erase an
+attempt from the only record of what was tried.
+
+Gate status is its own closed vocabulary, `pending|pass|fail|timeout`, separate from
+task status. `timeout` is distinct from `fail` so `ocaw status` can tell a slow gate
+from a broken one.
 
 ---
 

@@ -218,12 +218,20 @@ func (c Code) Category() Category {
 // Exit returns the process exit code for a code.
 func (c Code) Exit() int { return c.Category().Exit() }
 
-// NewError builds an error payload.
+// NewError builds an error payload with a literal message.
+//
+// Note the order: message second, hint third. Errorf takes the hint second,
+// because its third argument is a format string. Passing the two positionally is
+// the one mistake this API invites, so prefer Errorf wherever the message is
+// built from a value, and TestConstructorsAgreeOnArgumentOrder pins the two.
 func NewError(code Code, message, hint string) *Error {
 	return &Error{Code: code, Message: message, Hint: hint}
 }
 
 // Errorf builds an error payload with a formatted message.
+//
+// The hint comes second so a formatted message and its literal hint read
+// together at the call site; it is a deliberate asymmetry with NewError.
 func Errorf(code Code, hint, format string, args ...any) *Error {
 	return NewError(code, fmt.Sprintf(format, args...), hint)
 }
