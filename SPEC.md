@@ -227,6 +227,26 @@ Required: `name` (matching the directory name). Optional: `version`, `descriptio
 or whose `description` is missing, because description matching is how an agent decides
 to load a skill.
 
+#### Frontmatter subset boundary
+
+Per §9.1 the reader accepts only the shapes above, and a construct outside them is an
+error naming the construct rather than a silent drop. The practical limits, measured
+against 90 third-party `SKILL.md` files on the development machine (39 parse, 51 are
+correctly refused):
+
+| Construct | Verdict | Consequence |
+|---|---|---|
+| Folded/literal block scalars (`>-`, `\|`) | refused | a long `description` must be one quoted line |
+| Flow collections (`[a, b]`, `{a: b}`) | refused, except `[]` | `allowed-tools` must be the comma string, not a list |
+| Any key outside the five above | refused | a third-party skill with `author:` or `tags:` is a `doctor` error |
+| `yes`/`no`/`on`/`off` for a boolean | refused | only `true`/`false` |
+
+This is a deliberate reading of §9.1, not an oversight: the alternative is a reader that
+guesses, and a guess here silently rewrites a config. `ocaw` writes skills itself, so
+the shape it emits is the shape it reads. Widening the subset is a v1.1 decision —
+`doctor` (§7) is the component that has to be told about this, so that a hand-written
+third-party skill surfaces as a clear error rather than a confusing one.
+
 ---
 
 ## 6. State model
