@@ -618,20 +618,56 @@ which is the one thing the JSON contract exists to prevent.
 ### `ocaw verify`
 
 ```
-ocaw verify detect [--force]        # re-detect and print the command, store only with --save
-ocaw verify run [--task <id>] [--gate <name>] [-- <cmd>...]
+ocaw verify detect [--force] [--save]      # re-detect and print the command, store only with --save
+ocaw verify run [--task <id>] [--gate <name>] [--force] [--timeout <d>] [--verbose] [-- <cmd>...]
 ocaw verify history [--task <id>] [--limit <n>]
 ```
 
 - `run` with no `--task` verifies the whole workspace once (all gates of the named task, or
   all tasks when neither is given) and appends one record per gate to `runs.jsonl`.
-- Timeout default 10m, `--timeout <duration>` to override. Exceeding it is a failed attempt
+- Timeout default 10m, `--timeout <duration>` to override. A bare number is read as
+  **seconds**: reading `--timeout 10` as ten minutes is a plausible misreading of the
+  default, in the direction that hides a hang. Exceeding the deadline is a failed attempt
   with `error.code: "verify_timeout"`, not a hang.
+- The deadline kills the **process group**, not just the gate. Killing only the direct child
+  leaves any grandchild holding the output pipe, and `Wait` then blocks on the copy, so a
+  200ms deadline behind a `sleep 30` takes 30 seconds. A `WaitDelay` bounds the drain as
+  well, so even a survivor cannot turn the deadline into a hang.
+- The lock is held across every gate in a run, not released between them. A run is one
+  decision about the workspace, and interleaving another agent's `task set` would leave the
+  recorded attempt describing a state that never existed.
+- A command given with `-- <cmd>` is recorded against the named `--task` and `--gate`, and
+  the gate is **defined on the task first** so the task and the log cannot disagree about
+  which gates exist. Without that, stuck detection flags a gate with no definition and
+  `doctor` reports it as a broken gate command. `--task` is required: a record with no task
+  is a record the history cannot serve.
+- `--shell` is parseable and always refused. A flag that is accepted and then errors reads
+  as a bug in `ocaw` rather than as the rule it is, so the message names §9.4 and says what
+  to use instead.
+- A gate with `status: pass` and `last_exit: 0` is not re-run unless `--force`. It is not
+  recorded as a skip either: a gate that is silently absent from a run looks like a gate that
+  was forgotten.
 - **Stuck detection.** Three consecutive attempts with byte-identical output sets
-  `tasks[].stuck: true`. `ocaw task next` and `ocaw status` surface it. The CLI does not
-  auto-retry and never retries a gate on the agent's behalf — escalating is the agent's
-  decision, and hiding the attempt history would destroy the only evidence it has.
-- A gate with `status: pass` and `last_exit: 0` is not re-run unless `--force`.
+  `tasks[].stuck: true`. `ocaw task next`, `ocaw task show`, `ocaw task list` and
+  `ocaw status` surface it. The CLI does not auto-retry and never retries a gate on the
+  agent's behalf: escalating is the agent's decision, and hiding the attempt history would
+  destroy the only evidence it has. Output that *changes* between failures is not stuck —
+  the signal is the same thing recurring, not a gate that keeps failing.
+- A command that cannot be started is a `fail` attempt with no exit code, not an error. It
+  is evidence, and a caller that treats it as an error tends to drop it.
+- A malformed `runs.jsonl` is an error for `history` and a warning for `ocaw task`. The log
+  is the only record of what was tried, and a skipped line would erase an attempt; but
+  refusing to record a *task* because an old log line is broken would make it permanent.
+
+`detect` never overwrites a `verify_cmd` the project already chose without `--save`: §5.1 is
+explicit that the recorded command changes only by explicit request, and a project that has
+moved to Bazel or `just` has a correct answer that detection would replace with a guess. A
+project type with no conventional command is exit 3, not a guess.
+
+The gate-status vocabulary is defined once, in `internal/verify`, and aliased by
+`state.GateStatus`. `state` already depends on `verify` for `Tokenize`, so the dependency
+runs one way; defining "pass" in both places would leave two definitions to keep in step,
+and the step people forget is the one that makes a recorded run unreadable.
 
 ### `ocaw workflow`
 
