@@ -146,6 +146,9 @@ func budgetLine(b state.Budget) string {
 // newline would silently add a row — both corrupt the file for every reader
 // while leaving state.json perfectly correct. Backslashes are escaped first so
 // the escaping of a pipe cannot itself be escaped.
+//
+// Table cells only. Prose sections are emitted verbatim, because a pipe in a
+// sentence is not a table delimiter and rewriting it loses the author's text.
 func cell(v string) string {
 	v = strings.ReplaceAll(v, "\\", "\\\\")
 	v = strings.ReplaceAll(v, "|", "\\|")
@@ -180,6 +183,12 @@ func writeSection(b *strings.Builder, heading, body string) {
 	b.WriteString(body + "\n\n")
 }
 
+// writeList emits the constraints as plain bullets.
+//
+// Not cell(): cell() escapes pipes so a value cannot add a column to a markdown
+// table, and a bullet in a prose section is not a table cell. Escaping there
+// rewrites the author's text — `a | pipe` comes back as `a \| pipe` — which is
+// the data loss the authored half exists to prevent.
 func writeList(b *strings.Builder, heading string, items []string) {
 	b.WriteString(heading + "\n")
 	if len(items) == 0 {
@@ -187,13 +196,14 @@ func writeList(b *strings.Builder, heading string, items []string) {
 		return
 	}
 	for _, item := range items {
-		b.WriteString("- " + cell(item) + "\n")
+		b.WriteString("- " + item + "\n")
 	}
 	b.WriteString("\n")
 }
 
 // writeAcceptance keeps the stored id visible, because `ocaw workflow accept a1`
 // addresses items by id and a reader who cannot see it cannot tick the right box.
+// The text is not cell()-escaped, for the reason in writeList.
 func writeAcceptance(b *strings.Builder, items []state.Acceptance) {
 	b.WriteString("## Acceptance Criteria\n")
 	if len(items) == 0 {
@@ -205,7 +215,7 @@ func writeAcceptance(b *strings.Builder, items []state.Acceptance) {
 		if a.Done {
 			mark = "x"
 		}
-		b.WriteString(fmt.Sprintf("- [%s] %s  %s\n", mark, cell(a.ID), cell(a.Text)))
+		b.WriteString(fmt.Sprintf("- [%s] %s  %s\n", mark, a.ID, a.Text))
 	}
 	b.WriteString("\n")
 }

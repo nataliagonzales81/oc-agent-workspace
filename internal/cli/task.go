@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -731,28 +730,7 @@ func fail(data taskData, serr *state.Error) (taskData, []envelope.Warning, *enve
 	if serr == nil {
 		return data, nil, nil
 	}
-	detail := map[string]any{}
-	if raw := serr.Data(); raw != nil {
-		if m, ok := raw.(map[string]any); ok {
-			for k, v := range m {
-				detail[k] = v
-			}
-		}
-	}
-	detail["check"] = serr.Detail.Check
-	if !serr.Detail.Empty() {
-		if raw, err := json.Marshal(serr.Detail); err == nil {
-			var decoded map[string]any
-			if json.Unmarshal(raw, &decoded) == nil {
-				for k, v := range decoded {
-					if v != nil {
-						detail[k] = v
-					}
-				}
-			}
-		}
-	}
-	data.Detail = detail
+	data.Detail = serr.DetailMap()
 	return data, nil, serr.Envelope()
 }
 

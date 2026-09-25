@@ -1,6 +1,7 @@
 package state
 
 import (
+	"encoding/json"
 	"github.com/nataliagonzales81/oc-agent-workspace/internal/envelope"
 )
 
@@ -105,6 +106,34 @@ func (e *Error) Data() any {
 		return nil
 	}
 	return e.Detail
+}
+
+// DetailMap is Data as the map an envelope payload carries.
+//
+// It exists because Data returns the struct, and a command that type-asserts to
+// map[string]any gets nil — silently, every time. Two commands had that bug
+// independently before this accessor was added, and a third caller would have
+// too. The omitempty tags on Detail are what decide the keys, so the map and the
+// JSON can never disagree.
+func (e *Error) DetailMap() map[string]any {
+	if e == nil {
+		return nil
+	}
+	return e.Detail.toMap()
+}
+
+func (d Detail) toMap() map[string]any {
+	raw, err := json.Marshal(d)
+	if err != nil {
+		return map[string]any{}
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return map[string]any{}
+	}
+	// The marshalled struct is a fresh map either way, so nothing here shares
+	// memory with the Detail it came from.
+	return out
 }
 
 // Exit returns the process exit code the failure demands (SPEC §8).

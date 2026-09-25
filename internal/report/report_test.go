@@ -337,3 +337,31 @@ func codeOf(t *testing.T, err *envelope.Error) string {
 	}
 	return string(err.Code)
 }
+
+// cell() escapes pipes so a table cell cannot add a column. Applying it to a
+// prose section rewrites the author's sentence — `a | pipe` came back as
+// `a \| pipe` — which is the data loss the authored half exists to prevent. The
+// constraints and acceptance criteria are bullets, not cells.
+func TestProseSectionsAreNotCellEscaped(t *testing.T) {
+	s := state.New()
+	s.Workflow.Constraints = []string{"a | pipe, a #hash, and  trailing space  "}
+	s.Workflow.Acceptance = []state.Acceptance{{ID: "a1", Text: "keep | me | this"}}
+
+	doc := Render(s)
+	if !strings.Contains(doc, "- a | pipe, a #hash, and  trailing space  ") {
+		t.Errorf("the constraint was escaped as if it were a table cell:\n%s", doc)
+	}
+	if !strings.Contains(doc, "- [ ] a1  keep | me | this") {
+		t.Errorf("the acceptance text was escaped as if it were a table cell:\n%s", doc)
+	}
+	if strings.Contains(doc, `\|`) {
+		t.Errorf("a pipe was escaped somewhere in a prose section:\n%s", doc)
+	}
+
+	// And a table cell is still protected, or a task title would add a column.
+	s.Tasks = []state.Task{{ID: "1", Title: "a | b", Deps: []string{}, Status: state.StatusPending}}
+	doc = Render(s)
+	if !strings.Contains(doc, `a \| b`) {
+		t.Errorf("a table cell is no longer protected:\n%s", doc)
+	}
+}

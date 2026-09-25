@@ -711,11 +711,40 @@ and the step people forget is the one that makes a recorded run unreadable.
 
 ```
 ocaw workflow set --request <s> [--scope <s>] [--constraint <s>...] [--accept <s>...]
-ocaw workflow accept <a1> [--done|--not-done]
+ocaw workflow accept <id> [--done|--not-done]
 ocaw workflow show
 ```
 
 Manages the authored (non-derived) top section of `WORKFLOW_STATE.md`.
+
+**A flag that was not given does not touch its field.** `ocaw workflow set --request X`
+leaves the scope, the constraints, and the acceptance criteria exactly as they were, and
+`data.changed` says which fields moved. The alternative — treating the whole section as
+one replaceable value — turns the most ordinary call into silent data loss.
+
+A flag that *was* given, with an empty value, means "clear it". A string flag cannot tell
+these two cases apart on its own, so the command asks the FlagSet which flags appeared
+rather than what they hold.
+
+`--accept` takes `id=text` or bare text. Bare text gets the next `a<N>`, continuing from
+the highest numeric id already in use, and the counter advances *within* one call as well
+as across calls: a command carrying both `--accept a1=first` and `--accept second` must not
+hand the second one `a1` too, because `SetAcceptance` merges by id and a collision is not
+an error — it is one criterion silently replacing another.
+
+A left side is read as an explicit id only when it matches `a<digits>` or is already an id
+in the workspace. A looser rule cannot distinguish `--accept "a1=ship it"` from
+`--accept "a=1 and b=2"`, and the second is prose somebody wrote. The cost is that a
+custom id scheme cannot be introduced in one call — `--accept "AC-1=…"` is filed as text
+and gets an assigned id the author can then see and use. That is the conservative
+direction: it never splits a sentence.
+
+`accept` defaults to ticking, since the command is named after the act and the negative
+case is spelled out when wanted. Neither flag is a silent no-op.
+
+`data` is `{subcommand, workflow{request,scope,constraints}, acceptance, render, accepted,
+accepted_set, changed, written, dry_run, notes, detail}` — every key present, every list an
+array, on the same terms as `ocaw task`.
 
 ### `ocaw report`
 
@@ -723,9 +752,26 @@ Manages the authored (non-derived) top section of `WORKFLOW_STATE.md`.
 ocaw report [--write] [--format <md|json>] [--output <path>]
 ```
 
-- Without `--write`, prints the rendered markdown to stdout (or JSON with `--format json`).
+- Without `--write`, reports the drift state and the rendered document, and writes nothing.
 - With `--write`, regenerates `WORKFLOW_STATE.md`. This is the repair for the divergence
-  error in §6.2.
+  error in §6.2, and it takes the lock because it is a mutation. A read-only `report` takes
+  no lock, and failing with `lock_held` because someone else is working would be a strange
+  answer to "what does the file say".
+- `--format md` emits the rendered markdown to stdout, and is the only way to get anything
+  other than the envelope there. It is honoured in a non-TTY, because
+  `ocaw report --format md > file.md` is the documented way to get a copy and making that
+  need a terminal would be a strange rule. Every other combination still follows §4.1,
+  including `--quiet` and the global `--output`.
+- `data.previous_status` is what the file was *before* the command touched it, and `notes`
+  says when a hand-edited file was replaced. `ocaw report --write` on an edited file is
+  the one operation that discards somebody's hand edits, so it says so rather than doing it
+  quietly.
+
+**Prose sections are not table cells.** The constraints and acceptance criteria are emitted
+byte for byte, pipes and all. `cell()` exists so a value cannot add a column to a markdown
+table, and applying it to a bullet list rewrites the author's sentence — `a | pipe` came
+back as `a \| pipe`. That is the data loss the authored half exists to prevent, so the
+escaping stays in the tables where the threat is.
 
 ### `ocaw schema`
 

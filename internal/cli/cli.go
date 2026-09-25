@@ -122,6 +122,8 @@ type command struct {
 
 var commands = []*command{
 	versionCommand,
+	workflowCommand,
+	reportCommand,
 	taskCommand,
 	verifyCommand,
 	initCommand,
