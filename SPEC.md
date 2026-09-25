@@ -137,6 +137,9 @@ never on `message` text.
 - Concurrent agents are safe: a single-writer lock at `.agent/state/lock`, acquired with
   `O_EXCL`, containing pid + host + timestamp. Stale locks (> 15 min, dead pid) are
   broken with a warning. The CLI never waits on a lock — it fails with `lock_held`.
+  Age comes from the recorded timestamp, falling back to the file's mtime when the
+  contents cannot be parsed, so the window between the exclusive create and the first
+  write reads as *held* rather than as *stale*.
 - `WORKFLOW_STATE.md` is regenerated on every mutation. `state.json` and
   `WORKFLOW_STATE.md` must never diverge; `doctor` checks this.
 

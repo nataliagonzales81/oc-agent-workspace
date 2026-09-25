@@ -44,6 +44,18 @@ type Error struct {
 	Hint    string `json:"hint"`
 }
 
+// Error makes *Error an ordinary error so a command can return it from a
+// helper that returns error without erasing the code. The rendering is the one
+// an agent reads on stderr, and it deliberately omits the hint: the hint is a
+// separate field of the envelope, and repeating it here invites a caller to
+// parse prose.
+func (e *Error) Error() string {
+	if e == nil {
+		return "<nil>"
+	}
+	return string(e.Code) + ": " + e.Message
+}
+
 // Warning is a non-fatal observation. Warnings never change OK.
 type Warning struct {
 	Code    Code   `json:"code"`

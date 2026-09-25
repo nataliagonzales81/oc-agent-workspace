@@ -2,6 +2,7 @@ package envelope
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -261,5 +262,22 @@ func TestErrorf(t *testing.T) {
 	}
 	if e.Code.Exit() != 5 {
 		t.Fatalf("dep_cycle must exit 5, got %d", e.Code.Exit())
+	}
+}
+
+// *Error must satisfy error so a package can return it from a helper without
+// losing the code. The rendering is what reaches a human on stderr, so it is
+// pinned: code and message, never the hint, which lives in its own field.
+func TestErrorSatisfiesError(t *testing.T) {
+	var err error = NewError(CodeLockHeld, "the workspace lock is held by pid 42 on host h since 2026-09-25T00:00:00Z", "retry later")
+	if got := err.Error(); got != "lock_held: the workspace lock is held by pid 42 on host h since 2026-09-25T00:00:00Z" {
+		t.Errorf("Error() = %q", got)
+	}
+	var nilErr *Error
+	if got := nilErr.Error(); got != "<nil>" {
+		t.Errorf("nil Error() = %q, want <nil>", got)
+	}
+	if !errors.Is(err, err) {
+		t.Error("errors.Is must find the error itself")
 	}
 }

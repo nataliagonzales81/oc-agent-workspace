@@ -13,11 +13,11 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/nataliagonzales81/oc-agent-workspace/internal/envelope"
+	"github.com/nataliagonzales81/oc-agent-workspace/internal/workspace"
 )
 
 // Mode is the resolved output rendering.
@@ -487,7 +487,7 @@ func emit(ctx *Context, mode Mode, res envelope.Result, human humanFunc) int {
 	}
 
 	if path := ctx.Options.Output; path != "" {
-		if err := writeFileAtomic(path, payload); err != nil {
+		if err := workspace.WriteFileAtomic(path, payload); err != nil {
 			if _, werr := fmt.Fprintf(ctx.Stderr, "ocaw: error: %s: %v\n", envelope.CodeWriteFailed, err); werr != nil {
 				return envelope.CatInternal.Exit()
 			}
@@ -505,27 +505,4 @@ func emit(ctx *Context, mode Mode, res envelope.Result, human humanFunc) int {
 func reportInternal(ctx *Context, err error) int {
 	_, _ = fmt.Fprintf(ctx.Stderr, "ocaw: error: %s: %v\n", envelope.CodeInternal, err)
 	return envelope.CodeInternal.Exit()
-}
-
-func writeFileAtomic(path string, data []byte) error {
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, ".ocaw-out-*")
-	if err != nil {
-		return err
-	}
-	name := tmp.Name()
-	defer func() {
-		tmp.Close()
-		os.Remove(name)
-	}()
-	if _, err := tmp.Write(data); err != nil {
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(name, path)
 }
