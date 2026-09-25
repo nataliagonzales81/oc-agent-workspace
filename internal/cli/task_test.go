@@ -102,7 +102,7 @@ func initialisedTaskRepo(t *testing.T) string {
 
 // AC4 — tasks 1←2←3, next returns 1; after `set 1 --status done`, next
 // returns 2.
-func TestAC4NextFollowsTheChain(t *testing.T) {
+func TestAC4NextFollowsTheChainAndAdvances(t *testing.T) {
 	dir := initialisedTaskRepo(t)
 	chain(t, dir)
 
@@ -178,7 +178,7 @@ func TestAC5AlsoHoldsForAdd(t *testing.T) {
 }
 
 // AC6 — a dep cycle exits 5 with dep_cycle and names the cycle path.
-func TestAC6CycleIsRefusedAndNamed(t *testing.T) {
+func TestAC6ADepCycleIsRefusedAndNamed(t *testing.T) {
 	dir := initialisedTaskRepo(t)
 	// Built in an order that never dangles: a dep must already be a task, so
 	// the chain is assembled from the far end backwards.

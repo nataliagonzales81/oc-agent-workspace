@@ -103,8 +103,10 @@ func goldenCases(t *testing.T) []goldenCase {
 		gate := writeExecutable(t, dir, "gate.sh", "#!/bin/sh\necho 'FAIL: two things are wrong'\nexit 1\n")
 		mustRunExit(t, dir, taskCommandName, 0, "add", "--id", "1", "--title", "broken", "--gate", "test="+gate)
 		mustRunExit(t, dir, taskCommandName, 0, "set", "1", "--status", "in_progress")
-		for range state3 {
-			mustRunExit(t, dir, verifyCommandName, 0, "run", "--force")
+		// A failing gate exits 4 (AC8), so the setup that manufactures three of
+		// them asserts 4. Asserting 0 here would have been asserting the bug.
+		for range stuckAfter {
+			mustRunExit(t, dir, verifyCommandName, 4, "run", "--force")
 		}
 	}
 	// described is a workspace with prose in every authored section, which is
@@ -160,8 +162,8 @@ func goldenCases(t *testing.T) []goldenCase {
 		{name: "task-dry-run", setup: chain, argv: []string{taskCommandName, "add", "--id", "4", "--title", "fourth", "--dry-run"}, wantExit: 0},
 
 		{name: "verify-run-pass", setup: passingGate(t), argv: []string{verifyCommandName, "run"}, wantExit: 0},
-		{name: "verify-run-fail", setup: failingGate(t), argv: []string{verifyCommandName, "run"}, wantExit: 0},
-		{name: "verify-run-timeout", setup: timingOutGate(t), argv: []string{verifyCommandName, "run", "--timeout", "1"}, wantExit: 0},
+		{name: "verify-run-fail", setup: failingGate(t), argv: []string{verifyCommandName, "run"}, wantExit: 4},
+		{name: "verify-run-timeout", setup: timingOutGate(t), argv: []string{verifyCommandName, "run", "--timeout", "1"}, wantExit: 4},
 		{name: "verify-history", setup: twoFailedRuns(t), argv: []string{verifyCommandName, "history"}, wantExit: 0},
 
 		{name: "workflow-set", setup: initialised, argv: []string{workflowCommandName, "set", "--request", "ship it", "--constraint", "stdlib only", "--accept", "the DAG is validated"}, wantExit: 0},
@@ -177,8 +179,10 @@ func goldenCases(t *testing.T) []goldenCase {
 	}
 }
 
-// state3 is the attempt count that makes a gate stuck: StuckThreshold is 3.
-const state3 = 3
+// stuckAfter is the attempt count that makes a gate stuck. state.StuckThreshold
+// is 3, and a golden that depends on that number is a golden that breaks when it
+// changes — which is correct, since the number is part of the contract.
+const stuckAfter = 3
 
 func passingGate(t *testing.T) func(t *testing.T, dir string) {
 	return func(t *testing.T, dir string) {
@@ -207,8 +211,8 @@ func timingOutGate(t *testing.T) func(t *testing.T, dir string) {
 func twoFailedRuns(t *testing.T) func(t *testing.T, dir string) {
 	return func(t *testing.T, dir string) {
 		failingGate(t)(t, dir)
-		mustRunExit(t, dir, verifyCommandName, 0, "run")
-		mustRunExit(t, dir, verifyCommandName, 0, "run", "--force")
+		mustRunExit(t, dir, verifyCommandName, 4, "run")
+		mustRunExit(t, dir, verifyCommandName, 4, "run", "--force")
 	}
 }
 

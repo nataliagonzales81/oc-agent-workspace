@@ -895,9 +895,17 @@ means "your request contradicts the state", and an agent recovers from them diff
 7. Hand-editing the `## Workflow DAG` table in `WORKFLOW_STATE.md` then `ocaw doctor`
    exits 4 with `error.code: "render_drift"`; `ocaw report --write` then `ocaw doctor`
    exits 0.
-8. `ocaw verify run` against a failing `go test` exits non-zero, appends a record to
-   `runs.jsonl` with the real exit code, and leaves the gate `fail` — it does not
-   "fix" or retry.
+8. `ocaw verify run` against a failing `go test` exits non-zero — `4`, with
+   `error.code: "verify_failed"` — appends a record to `runs.jsonl` with the real exit code,
+   and leaves the gate `fail`. It does not "fix" or retry.
+
+   The record is written *before* the exit code is decided, so a failure is fully
+   recorded whether or not the command is happy about it. And the exit code is the only way
+   `ocaw verify run && ocaw task set 1 --status done` refuses to mark a task done whose gate
+   failed; without it, the only defence is reading `data.attempts`, which is the parsing this
+   contract exists to remove. `verify_timeout` is the distinct code for a gate that never
+   finished, also exit 4, so a slow gate is never confused with a broken one. A **skipped**
+   gate is not a failure and does not change the exit code.
 9. Three identical failing runs set `stuck: true`, visible in `ocaw status --json`.
 10. Every command with a non-TTY stdout emits exactly one line of valid JSON that
     round-trips through `encoding/json` into the documented envelope.
@@ -905,7 +913,16 @@ means "your request contradicts the state", and an agent recovers from them diff
     `git status --porcelain` empty.
 12. A skill with `name:` mismatching its directory is a `doctor` error.
 13. `go test ./...` passes; `go vet ./...` is clean; `CGO_ENABLED=0 go build ./cmd/ocaw`
-    produces a static binary.
+    produces a static binary, asserted from the recorded `CGO_ENABLED=0` build setting rather
+    than from the bytes — a pure-Go `darwin` binary still references `libSystem` for syscalls,
+    so looking for a dynamic loader in the file proves nothing. `go list -m all` reports one
+    module. Nothing ocaw ships imports `net/http`, `net/url`, `net/rpc` or `net/smtp`.
+
+    The static-build and dependency checks live in `acceptance/`, not in `internal/`, because
+    they shell out to the Go toolchain and `internal/` is held to a stricter rule: the shipped
+    tool reaches `os/exec` in exactly two places, `internal/verify` (which runs a gate) and
+    `internal/doctor` (which resolves one on `PATH` and starts nothing). Weakening either rule
+    so one suite could hold both would lose the narrower one.
 14. A goldens harness records the exact bytes of every command's envelope under
     `testdata/goldens/`, compared line for line. Two things are substituted before
     the comparison, and nothing else: the workspace's own path, and RFC3339
@@ -926,6 +943,20 @@ means "your request contradicts the state", and an agent recovers from them diff
     tag fails 4 goldens, reordering the envelope's keys fails 32, dropping a key fails
     6, adding an optional key fails 8, and changing a heading in the generated markdown
     fails 2. A breaking change fails CI.
+
+---
+
+## 10.1 The acceptance suite
+
+`acceptance/` is §10 as an executable list: one `TestAC<n>…` per criterion, plus the
+toolchain checks and the README's examples run as written. A test named after a criterion is
+the *definition* of that criterion, and the map from criterion to test is checked against the
+source rather than asserted in a comment — a test that was renamed or deleted leaves the map
+pointing at nothing.
+
+The tests read the contract the way a consumer does: assertions go through the decoded
+envelope's map keys, not against `internal` types. A payload that stopped being the documented
+shape fails here rather than in somebody's agent.
 
 ---
 

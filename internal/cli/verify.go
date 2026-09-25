@@ -127,8 +127,13 @@ var verifyCommand = &command{
 	summary:   "run the project's verification and record what happened",
 	usage:     "ocaw verify <" + verifySubNames() + "> [flags]",
 	takesArgs: true,
-	run:       runVerify,
-	human:     humanVerifyDispatch,
+	// A failed gate exits 4 with the attempt still recorded, and the human
+	// rendering of that attempt — the command's own output — is the thing a
+	// person on a terminal came to read. Suppressing it on a failed envelope
+	// would hide the output of a failing test, which is the opposite of helpful.
+	humanOnError: true,
+	run:          runVerify,
+	human:        humanVerifyDispatch,
 }
 
 func verifySubNames() string {
@@ -470,7 +475,56 @@ func runVerifyRun(c *Context) (verifyData, []envelope.Warning, *envelope.Error) 
 			}
 		}
 	}
-	return data, warnings, nil
+	return data, warnings, verdict(data.Attempts, data.Timeout)
+}
+
+// verdict reports the run's result as an envelope error, which is what makes the
+// exit code mean something at a shell boundary.
+//
+// SPEC §10 AC8 says a failing gate exits non-zero, and §8 already has the code
+// for it: verify_failed and verify_timeout both land in the validation family,
+// so exit 4. They are defined and were unused, which is the tell: an exit code
+// nobody can reach is an exit code nobody can write a branch on.
+//
+// The alternative — exit 0 because "the run happened" — is true and useless at
+// the boundary. `ocaw verify run && ocaw task set 1 --status done` would mark a
+// task done whose gate failed, and the only way to prevent that is for the
+// caller to read data.attempts, which is the parsing this contract exists to
+// remove.
+//
+// The records are already appended and the state already saved by the time this
+// runs, so a failure is still fully recorded. That ordering is the point: the
+// attempt happened whether or not the command is happy about it.
+func verdict(attempts []attemptData, timeout string) *envelope.Error {
+	// The first failure in gate order, so a caller told "which gate" is told
+	// about the same one every time rather than whichever sorted last.
+	for _, a := range attempts {
+		if a.Skipped {
+			continue
+		}
+		switch state.GateStatus(a.Status) {
+		case state.GateTimeout:
+			return envelope.Errorf(
+				envelope.CodeVerifyTimeout,
+				"raise --timeout, or find out why the gate hangs: "+a.Gate,
+				"gate %q on task %q did not finish within %s", a.Gate, a.Task, timeout,
+			)
+		case state.GateFail:
+			return envelope.Errorf(
+				envelope.CodeVerifyFailed,
+				"read the output, fix the cause, then run again: "+a.Gate,
+				"gate %q on task %q failed%s", a.Gate, a.Task, exitSuffix(a.Exit),
+			)
+		}
+	}
+	return nil
+}
+
+func exitSuffix(exit *int) string {
+	if exit == nil {
+		return ""
+	}
+	return fmt.Sprintf(" with exit code %d", *exit)
 }
 
 // planRuns decides which gates to run, and reports the ones being skipped.

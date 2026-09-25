@@ -93,6 +93,22 @@ func mustVerify(t *testing.T, dir string, args ...string) verifyPayload {
 	return p
 }
 
+// mustVerifyFail is for the runs whose gate is *meant* to fail. A failing gate
+// exits 4 with verify_failed (SPEC §10 AC8), so the helper that expects the
+// failure is named for it rather than leaving `if code != 4` inline where a
+// reader has to remember why.
+func mustVerifyFail(t *testing.T, dir string, args ...string) verifyPayload {
+	t.Helper()
+	code, env, p := verifyRun(t, dir, args...)
+	if code != 4 {
+		t.Fatalf("ocaw verify %v: exit %d, want 4: %+v", args, code, env.Err)
+	}
+	if env.Err == nil || env.Err.Code != envelope.CodeVerifyFailed {
+		t.Fatalf("ocaw verify %v: code = %v, want verify_failed", args, env.Err)
+	}
+	return p
+}
+
 // gateScript writes an executable gate and returns its path. The gates in these
 // tests are real programs so the runner is exercised end to end rather than
 // against a mock of itself.
@@ -130,8 +146,11 @@ func TestAC8AFailingGate(t *testing.T) {
 	gatedTask(t, dir, "test", script)
 
 	code, env, data := verifyRun(t, dir, "run")
-	if code != 0 {
-		t.Fatalf("exit = %d, want 0: a failing gate is an attempt, not a command failure: %+v", code, env.Err)
+	if code != 4 {
+		t.Fatalf("exit = %d, want 4: a failing gate exits non-zero (AC8), after the record is written: %+v", code, env.Err)
+	}
+	if env.Err == nil || env.Err.Code != envelope.CodeVerifyFailed {
+		t.Fatalf("code = %v, want verify_failed", env.Err)
 	}
 	if len(data.Attempts) != 1 {
 		t.Fatalf("attempts = %d, want exactly one: nothing may be retried", len(data.Attempts))
@@ -179,7 +198,7 @@ func TestAC9ThreeIdenticalFailuresAreStuck(t *testing.T) {
 	gatedTask(t, dir, "test", script)
 
 	for i := range 3 {
-		data := mustVerify(t, dir, "run")
+		data := mustVerifyFail(t, dir, "run")
 		if len(data.Attempts) != 1 {
 			t.Fatalf("attempt %d: %d attempts, want 1", i, len(data.Attempts))
 		}
@@ -193,7 +212,7 @@ func TestAC9ThreeIdenticalFailuresAreStuck(t *testing.T) {
 		}
 	}
 
-	data := mustVerify(t, dir, "run", "--force")
+	data := mustVerifyFail(t, dir, "run", "--force")
 	if !data.Attempts[0].Stuck {
 		t.Error("a fourth identical failure did not leave the gate stuck")
 	}
@@ -217,7 +236,7 @@ func TestDifferentFailuresAreNotStuck(t *testing.T) {
 	gatedTask(t, dir, "test", script)
 
 	for range 3 {
-		data := mustVerify(t, dir, "run", "--force")
+		data := mustVerifyFail(t, dir, "run", "--force")
 		if data.Attempts[0].Stuck {
 			t.Fatalf("output changed every run, so nothing is stuck: %+v", data.Attempts[0])
 		}
@@ -228,7 +247,7 @@ func TestAStuckGateIsAlsoFlaggedOnTheTask(t *testing.T) {
 	dir, script := verifiedRepo(t, "echo identical; exit 1")
 	gatedTask(t, dir, "test", script)
 	for range 3 {
-		mustVerify(t, dir, "run")
+		mustVerifyFail(t, dir, "run")
 	}
 	shown := mustTask(t, dir, "show", "1")
 	if !shown.Task.Stuck {
@@ -263,6 +282,7 @@ func TestAPassingGateIsNotReRunWithoutForce(t *testing.T) {
 	}
 
 	// A second plain run must record nothing: the gate passes and is skipped.
+	// A skipped gate is not a failure, so the run still exits 0.
 	after := mustVerify(t, dir, "run")
 	if len(after.Attempts) != 0 {
 		t.Errorf("attempts = %+v, want none: a passing gate is skipped", after.Attempts)
@@ -288,8 +308,11 @@ func TestATimeoutIsNeverAHang(t *testing.T) {
 	gatedTask(t, dir, "test", script)
 
 	code, env, data := verifyRun(t, dir, "run", "--timeout", "200ms")
-	if code != 0 {
-		t.Fatalf("exit = %d, want 0: a timeout is an attempt, not a command failure: %+v", code, env.Err)
+	if code != 4 {
+		t.Fatalf("exit = %d, want 4: a timeout is a failure the caller must see, distinct from a broken gate: %+v", code, env.Err)
+	}
+	if env.Err == nil || env.Err.Code != envelope.CodeVerifyTimeout {
+		t.Fatalf("code = %v, want verify_timeout", env.Err)
 	}
 	att := data.Attempts[0]
 	if att.Status != state.GateTimeout {
@@ -378,6 +401,8 @@ func TestDryRunRecordsNothing(t *testing.T) {
 func TestARunWithNoGatesSaysSo(t *testing.T) {
 	dir := initialisedTaskRepo(t)
 	mustTask(t, dir, "add", "--id", "1", "--title", "first")
+	// Nothing to run is a success, not a failure: the run happened and the
+	// answer was "no gates". Only a gate that ran and failed is exit 4.
 	data := mustVerify(t, dir, "run")
 	if len(data.Attempts) != 0 {
 		t.Errorf("attempts = %+v, want none", data.Attempts)
@@ -450,15 +475,15 @@ func TestRunIsScopedToATaskAndAGate(t *testing.T) {
 	mustTask(t, dir, "set", "1", "--gate", "lint="+fail)
 	mustTask(t, dir, "set", "2", "--gate", "test="+pass)
 
-	all := mustVerify(t, dir, "run")
+	all := mustVerifyFail(t, dir, "run")
 	if len(all.Attempts) != 3 {
 		t.Errorf("all tasks: %d attempts, want 3", len(all.Attempts))
 	}
-	one := mustVerify(t, dir, "run", "--force", "--task", "1")
+	one := mustVerifyFail(t, dir, "run", "--force", "--task", "1")
 	if len(one.Attempts) != 2 {
 		t.Errorf("one task: %d attempts, want 2", len(one.Attempts))
 	}
-	oneGate := mustVerify(t, dir, "run", "--force", "--task", "1", "--gate", "lint")
+	oneGate := mustVerifyFail(t, dir, "run", "--force", "--task", "1", "--gate", "lint")
 	if len(oneGate.Attempts) != 1 || oneGate.Attempts[0].Gate != "lint" {
 		t.Errorf("one gate: %+v, want just lint", oneGate.Attempts)
 	}
@@ -472,9 +497,9 @@ func TestHistoryFiltersAndLimits(t *testing.T) {
 	mustTask(t, dir, "set", "2", "--gate", "test="+other)
 
 	for range 3 {
-		mustVerify(t, dir, "run", "--task", "1", "--force")
+		mustVerifyFail(t, dir, "run", "--task", "1", "--force")
 	}
-	mustVerify(t, dir, "run", "--task", "2", "--force")
+	mustVerifyFail(t, dir, "run", "--task", "2", "--force")
 
 	all := mustVerify(t, dir, "history")
 	if len(all.Runs) != 4 {
@@ -625,8 +650,10 @@ func TestVerifyHumanRendering(t *testing.T) {
 	gatedTask(t, dir, "test", script)
 
 	var out bytes.Buffer
-	if code := cli.Main([]string{"--dir", dir, verifyCommandName, "run"}, &out, io.Discard, true); code != 0 {
-		t.Fatalf("exit %d", code)
+	// Exit 4: the human rendering of a failed gate is still worth printing, so
+	// this command is one of the few whose renderer runs on a failed envelope.
+	if code := cli.Main([]string{"--dir", dir, verifyCommandName, "run"}, &out, io.Discard, true); code != 4 {
+		t.Fatalf("exit %d, want 4", code)
 	}
 	if !strings.Contains(out.String(), "FAIL") || !strings.Contains(out.String(), "attempt 1") {
 		t.Errorf("human run output:\n%s", out.String())
@@ -661,7 +688,13 @@ func TestTheCLIDeadlineSurvivesAGrandchild(t *testing.T) {
 	commitAll(t, dir)
 
 	start := time.Now()
-	data := mustVerify(t, dir, "run", "--timeout", "200ms")
+	code, env, data := verifyRun(t, dir, "run", "--timeout", "200ms")
+	if code != 4 {
+		t.Fatalf("exit %d, want 4: %+v", code, env.Err)
+	}
+	if env.Err == nil || env.Err.Code != envelope.CodeVerifyTimeout {
+		t.Fatalf("code = %v, want verify_timeout", env.Err)
+	}
 	elapsed := time.Since(start)
 	if len(data.Attempts) != 1 {
 		t.Fatalf("attempts = %+v, want one", data.Attempts)

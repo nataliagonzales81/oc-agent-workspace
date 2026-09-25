@@ -250,11 +250,15 @@ func TestStatusReadyAndBlockedAgreeWithTaskList(t *testing.T) {
 func TestAC9StuckIsVisibleInStatus(t *testing.T) {
 	dir := populated(t)
 	// One gate, three identical failures. `verify run` exits 0 when the run
-	// happened: a failing gate is an attempt recorded, not a command failure.
+	// happened: each run is recorded in full before the exit code is decided
+	// (AC8), so three failing runs leave three records and three exit-4s.
 	for range 3 {
 		code, env, payload := verifyRun(t, dir, "run", "--task", "1", "--gate", "test", "--force")
-		if code != 0 {
-			t.Fatalf("verify run: exit %d: %+v", code, env.Err)
+		if code != 4 {
+			t.Fatalf("verify run: exit %d, want 4: %+v", code, env.Err)
+		}
+		if env.Err == nil || env.Err.Code != envelope.CodeVerifyFailed {
+			t.Fatalf("code = %v, want verify_failed", env.Err)
 		}
 		if len(payload.Attempts) != 1 || payload.Attempts[0].Status != "fail" {
 			t.Fatalf("attempt = %+v, want one fail", payload.Attempts)
@@ -365,8 +369,8 @@ func TestStatusFocusCarriesGateHistory(t *testing.T) {
 	dir := initialisedTaskRepo(t)
 	mustTask(t, dir, "add", "--id", "1", "--title", "first", "--gate", "test="+gateScript(t, "exit 1"))
 	for range 3 {
-		if code, env, _ := verifyRun(t, dir, "run", "--task", "1", "--gate", "test", "--force"); code != 0 {
-			t.Fatalf("verify: exit %d: %+v", code, env.Err)
+		if code, env, _ := verifyRun(t, dir, "run", "--task", "1", "--gate", "test", "--force"); code != 4 {
+			t.Fatalf("verify: exit %d, want 4: %+v", code, env.Err)
 		}
 	}
 	p := mustStatus(t, dir, "--task", "1")
@@ -537,8 +541,8 @@ func TestStatusHumanRendering(t *testing.T) {
 	mustTask(t, dir, "add", "--id", "1", "--title", "scaffold", "--agent", "coder", "--gate", "test="+gateScript(t, "exit 1"))
 	mustTask(t, dir, "add", "--id", "2", "--title", "invariants", "--agent", "coder", "--dep", "1")
 	for range 3 {
-		if code, env, _ := verifyRun(t, dir, "run", "--task", "1", "--gate", "test", "--force"); code != 0 {
-			t.Fatalf("verify: exit %d: %+v", code, env.Err)
+		if code, env, _ := verifyRun(t, dir, "run", "--task", "1", "--gate", "test", "--force"); code != 4 {
+			t.Fatalf("verify: exit %d, want 4: %+v", code, env.Err)
 		}
 	}
 
