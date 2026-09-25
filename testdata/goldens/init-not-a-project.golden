@@ -1,0 +1,1 @@
+{"ok":false,"command":"init","data":null,"error":{"code":"not_a_project","message":"<ROOT> holds no project marker and is not inside a git repository","hint":"ocaw init --project-type unknown"},"warnings":[],"schema":"ocaw/init@1"}

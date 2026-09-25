@@ -1,0 +1,1 @@
+{"ok":false,"command":"ocaw","data":{"available_commands":["doctor","init","report","schema","status","task","verify","version","workflow"]},"error":{"code":"usage","message":"no command given","hint":"ocaw --help"},"warnings":[],"schema":"ocaw/ocaw@1"}

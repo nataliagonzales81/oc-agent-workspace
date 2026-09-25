@@ -1,0 +1,1 @@
+{"ok":false,"command":"task","data":{"subcommand":"show","task":null,"tasks":[],"removed":[],"counts":{"blocked":0,"cancelled":0,"done":0,"in_progress":0,"pending":0},"ready":[],"blocked":{},"created":false,"dry_run":false,"detail":{}},"error":{"code":"task_not_found","message":"no task with id \"nope\"","hint":"ocaw task list"},"warnings":[],"schema":"ocaw/task@1"}

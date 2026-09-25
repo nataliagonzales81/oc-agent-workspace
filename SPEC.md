@@ -906,8 +906,26 @@ means "your request contradicts the state", and an agent recovers from them diff
 12. A skill with `name:` mismatching its directory is a `doctor` error.
 13. `go test ./...` passes; `go vet ./...` is clean; `CGO_ENABLED=0 go build ./cmd/ocaw`
     produces a static binary.
-14. A goldens test asserts the exact JSON of every command's envelope shape, so a
-    breaking schema change fails CI.
+14. A goldens harness records the exact bytes of every command's envelope under
+    `testdata/goldens/`, compared line for line. Two things are substituted before
+    the comparison, and nothing else: the workspace's own path, and RFC3339
+    timestamps. Whitespace, key order and spelling are all left alone, because
+    detecting those is the point — a pretty-printer change is a diff.
+
+    The goldens are **stricter than the schemas**, on purpose. `additionalProperties:
+    true` is what a *consumer* of a released payload wants: a newer ocaw that added
+    an optional field should not be rejected by an older schema. The goldens are the
+    producer's side — a new field is a decision someone makes, and regenerating the
+    goldens is how that decision gets reviewed.
+
+    ```sh
+    go test ./internal/cli/ -run TestGoldens -update
+    ```
+
+    Measured on the harness by breaking things on purpose: renaming a field's json
+    tag fails 4 goldens, reordering the envelope's keys fails 32, dropping a key fails
+    6, adding an optional key fails 8, and changing a heading in the generated markdown
+    fails 2. A breaking change fails CI.
 
 ---
 

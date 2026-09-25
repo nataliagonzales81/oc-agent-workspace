@@ -118,7 +118,10 @@ type doctorData struct {
 // hardcoded list — a check that finds nothing is still a check that ran.
 func ranChecks(rep *doctor.Report) []doctor.Check {
 	seen := map[doctor.Check]bool{}
-	var out []doctor.Check
+	// Never nil. A list field that is sometimes null and sometimes [] is a field
+	// a caller has to guard twice, and the goldens caught it: a clean workspace
+	// emitted "checks": null where a populated one emitted an array.
+	out := []doctor.Check{}
 	for _, check := range doctor.Checks {
 		if seen[check] {
 			continue

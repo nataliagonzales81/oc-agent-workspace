@@ -456,7 +456,13 @@ func runVerifyRun(c *Context) (verifyData, []envelope.Warning, *envelope.Error) 
 	}
 
 	stuck := state.StuckGates(recorded)
-	data.Stuck = stuck
+	// StuckGates returns nil for "none" and encoding/json writes that as null.
+	// The list fields of a payload are arrays or they are nothing, so "none" is
+	// written as []. The goldens caught it, on both the run and the history path.
+	data.Stuck = []state.Stuck{}
+	if len(stuck) > 0 {
+		data.Stuck = stuck
+	}
 	for i := range data.Attempts {
 		for _, s := range stuck {
 			if s.Task == data.Attempts[i].Task && s.Gate == data.Attempts[i].Gate {
@@ -671,6 +677,9 @@ func runVerifyHistory(c *Context) (verifyData, []envelope.Warning, *envelope.Err
 	}
 	data.Runs = runs
 	data.Stuck = state.StuckGates(runs)
+	if data.Stuck == nil {
+		data.Stuck = []state.Stuck{}
+	}
 	return data, nil, nil
 }
 

@@ -115,10 +115,23 @@ func schemaBuilder() *schema.Builder {
 	b.Enum(doctor.SeverityError, "error", "warning", "info")
 	b.Enum(report.StatusCurrent, "current", "stale", "edited", "foreign", "missing")
 	b.Enum(verify.Pass, "pass", "fail", "timeout")
+	// A json.RawMessage is a []byte, so without this the document field would be
+	// described as an array of integers — a schema that rejects every document
+	// ocaw emits. Found by the goldens, which validate the real envelope against
+	// the real document.
+	b.Override(json.RawMessage{}, documentTypeOverride)
 	return b
 }
 
 type schemaData struct {
+	// Document is the schema itself, as it appeared on stdout. It is a
+	// json.RawMessage rather than a string so the bytes reach the output
+	// unchanged — and the override below is required, because a RawMessage is a
+	// []byte underneath and the generator would otherwise describe the payload
+	// as an array of integers. The goldens caught that by validating the real
+	// envelope against the document and finding an object where an array had been
+	// promised.
+	//
 	// Key is the name this document was asked for. Several keys can share one
 	// document, because they describe the same envelope's data.
 	Key       string          `json:"key"`
@@ -132,6 +145,14 @@ type schemaData struct {
 	Bytes     int             `json:"bytes"`
 	Document  json.RawMessage `json:"document,omitempty"`
 }
+
+// documentTypeOverride describes json.RawMessage as the JSON value it carries,
+// which is the whole point of it. A byte slice holding an object is not an array
+// of numbers, and a schema that says otherwise rejects every document ocaw emits.
+var documentTypeOverride = schema.Override{Schema: &schema.Node{
+	Description: "The schema document itself, exactly as it was printed.",
+	Type:        "object",
+}}
 
 var schemaCommand = &command{
 	name:      schemaCommandName,
