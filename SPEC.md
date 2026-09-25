@@ -417,6 +417,46 @@ ocaw init [--dir <path>] [--name <string>] [--project-type <auto|go|node|python|
 - Exit `0` created or already valid · `3` path is not a project (no git root, no marker
   file) and `--project-type unknown` was not forced · `4` write failed.
 
+A directory inside a git repository counts as a project even with no marker file — the
+repo is the evidence — and gets `type: unknown` with an empty `verify_cmd`. The refusal
+in the second bullet is only for a directory that is neither.
+
+Marker priority is fixed, so two machines reading the same repo agree:
+
+| Marker | Type | `verify_cmd` | `lint_cmd` |
+|---|---|---|---|
+| `go.mod` | `go` | `go test ./...` | `go vet ./...` |
+| `Cargo.toml` | `rust` | `cargo test` | — |
+| `pyproject.toml` | `python` | `pytest` | — |
+| `package.json` | `node` | `npm test` | — |
+| `pom.xml` | `jvm` | `mvn test` | — |
+| `build.gradle` | `jvm` | `gradle test` | — |
+| `Makefile` | `make` | `make test` | — |
+
+A `Makefile` is last because every C project has one, and a Go project with a `Makefile`
+is still a Go project. `lint_cmd` is recorded only for Go: `go vet` ships with the
+toolchain, while `npm run lint` and `ruff check .` ship with nothing. An empty field is
+discoverable; a wrong one is a bug.
+
+`agent.yaml` is metadata, not content, and is rewritten on every run. Everything else is
+content and is written only when absent or empty. `WORKFLOW_STATE.md` and `state.json`
+follow the same rule: the DAG is work, so `init` never replaces it with a template, and
+`--force` does not reach either.
+
+What makes a second `init` byte-identical (AC2) is that nothing carries a fresh
+timestamp: the prose templates hold no date, and `created` and `verify_detected` are
+read back from the existing `agent.yaml` rather than regenerated.
+
+A `file_exists` warning fires only when the file's content is *not* the template ocaw
+would have written. A re-init that finds its own output is silent, because five
+warnings for "everything is already fine" is how an agent learns to ignore warnings; a
+file a human wrote or edited is reported, because `init` kept it and only the human
+knows.
+
+`--dry-run` writes nothing at all, including the lock: `Acquire` creates the directory
+it lives in, so locking in a dry run would touch the filesystem the flag exists to
+leave alone.
+
 ### `ocaw doctor`
 
 ```

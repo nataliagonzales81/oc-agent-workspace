@@ -105,6 +105,7 @@ type command struct {
 
 var commands = []*command{
 	versionCommand,
+	initCommand,
 }
 
 func commandByName(name string) *command {
@@ -313,14 +314,14 @@ func writeHelp(ctx *Context, mode Mode, name, topic string) int {
 func helpText(name, topic string) string {
 	if topic != "" {
 		if cmd := commandByName(topic); cmd != nil {
-			return fmt.Sprintf("%s\n\n%s\n\n%s\n", cmd.usage, cmd.summary, globalFlagHelp())
+			return fmt.Sprintf("%s\n\n%s\n\n%s\n", cmd.usage, cmd.summary, cmd.flagHelp())
 		}
 		return fmt.Sprintf("ocaw: no help for %q\n\n%s\n", topic, usageLine())
 	}
 	if name != "ocaw" {
 		cmd := commandByName(strings.TrimPrefix(name, "ocaw "))
 		if cmd != nil {
-			return fmt.Sprintf("%s\n\n%s\n\n%s\n", cmd.usage, cmd.summary, globalFlagHelp())
+			return fmt.Sprintf("%s\n\n%s\n\n%s\n", cmd.usage, cmd.summary, cmd.flagHelp())
 		}
 	}
 	return fmt.Sprintf(`ocaw — operate a project agent workspace
@@ -363,6 +364,48 @@ func commandHelp() string {
 	}
 	return b.String()
 }
+
+// flagHelp lists a command's own flags above the global ones.
+//
+// The command flags are discovered by running setup against a throwaway
+// FlagSet rather than by a hand-maintained list. A list would drift the first
+// time a flag was added without updating the help, and the person who finds out
+// is the one who typed --help to discover the flag existed.
+func (cmd *command) flagHelp() string {
+	if cmd.setup == nil {
+		return globalFlagHelp()
+	}
+	fs := newFlagSet("ocaw " + cmd.name)
+	// A fresh Options so a command's defaults never leak into the help text.
+	ctx := &Context{}
+	cmd.setup(fs, ctx)
+	var b strings.Builder
+	fs.VisitAll(func(f *flag.Flag) {
+		// Skip the globals: they are listed once, below.
+		if isGlobalFlagName(f.Name) {
+			return
+		}
+		name := "--" + f.Name
+		if ph := placeholder(f); ph != "" {
+			name += " " + ph
+		}
+		fmt.Fprintf(&b, "  %-18s %s\n", name, f.Usage)
+	})
+	if b.Len() == 0 {
+		return globalFlagHelp()
+	}
+	return "Flags:\n" + b.String() + "\n" + globalFlagHelp()
+}
+
+var globalFlagSet = func() map[string]bool {
+	fs := newFlagSet("ocaw")
+	registerGlobals(fs, &Options{})
+	out := make(map[string]bool)
+	fs.VisitAll(func(f *flag.Flag) { out[f.Name] = true })
+	return out
+}()
+
+func isGlobalFlagName(name string) bool { return globalFlagSet[name] }
 
 func globalFlagNames() []string {
 	fs := newFlagSet("ocaw")

@@ -37,6 +37,18 @@ type Project struct {
 // ProjectTypes is the closed set of values project.type may take.
 var ProjectTypes = []string{"go", "node", "python", "rust", "jvm", "make", "unknown"}
 
+// Named members of ProjectTypes, so a caller that builds an agent.yaml has
+// something to write other than a bare string literal.
+const (
+	ProjectTypeGo      = "go"
+	ProjectTypeNode    = "node"
+	ProjectTypePython  = "python"
+	ProjectTypeRust    = "rust"
+	ProjectTypeJvm     = "jvm"
+	ProjectTypeMake    = "make"
+	ProjectTypeUnknown = "unknown"
+)
+
 // ParseAgent reads an agent.yaml document.
 func ParseAgent(src string) (Agent, error) {
 	v, err := Parse(src, 1)
