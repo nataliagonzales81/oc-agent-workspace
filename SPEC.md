@@ -352,6 +352,39 @@ The `## Request` … `## Acceptance Criteria` sections are authored by the agent
 `doctor` (hash mismatch against the stored `rendered_sha256`) and reported as an error
 with hint `ocaw report --write`.
 
+The two halves are separated by a marker line carrying the hash of the derived block:
+
+```markdown
+<!-- ocaw:rendered_sha256=<hex> -->
+```
+
+The marker sits between the halves so the digest covers the derived block without
+covering itself. Three states are distinguished, all reported as `render_drift` with
+the same hint, because the two hash comparisons fall out in order and an agent
+debugging a colleague's commit needs to know which one happened:
+
+| State | Meaning |
+|---|---|
+| `current` | The derived block is exactly what the state renders to |
+| `stale` | The file is internally consistent, but the state has moved on |
+| `edited` | The stored hash does not match the derived block on disk |
+| `foreign` | The file has no marker, so ocaw did not generate it |
+| `missing` | There is no file yet — a first render, not drift |
+
+The authored half is outside the hash and is never compared, so prose above the marker
+cannot be drift. It is still emitted from state.json byte for byte — not trimmed, not
+reflowed, not bullet-converted — which is what "preserved verbatim" means here:
+`state.json` is the source of truth, so `report --write` restores text from it.
+
+`stuck` is not rendered into the markdown. §7 surfaces it through `ocaw task next` and
+`ocaw status`, which are the commands an agent reads; the file is for humans, and its
+columns are pinned.
+
+Table cells are escaped: `\` becomes `\\`, `|` becomes `\|`, and an embedded newline is
+folded to a space. A title containing a pipe would otherwise silently add a column and
+one containing a newline a row, corrupting the file for every reader while leaving
+`state.json` perfectly correct. Bullet items in `## Constraints` get the same escaping.
+
 `runs.jsonl` is one JSON object per line, appended and never rewritten. Each record
 carries the task, the gate, the argv that ran, the status, the exit code, the
 timestamp, the output, and the SHA-256 of the **full** output. Stored output is
