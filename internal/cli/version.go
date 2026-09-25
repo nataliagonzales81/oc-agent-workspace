@@ -37,7 +37,10 @@ func runVersion(c *Context, args []string) envelope.Result {
 			GoVersion: runtime.Version(),
 			Commit:    commit,
 			Dirty:     dirty,
-			SchemaMax: envelope.SchemaMajor,
+			// The highest major across every embedded document, not a constant.
+			// §4.2 defines schema_max as exactly that, and computing it means a
+			// new schema at major 2 cannot ship while version still claims 1.
+			SchemaMax: schemaMaxMajor(),
 		},
 	}
 }

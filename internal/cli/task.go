@@ -286,7 +286,7 @@ func runTask(c *Context, args []string) envelope.Result {
 // available, on stdout alongside the error on stderr. In JSON mode the envelope
 // already carries available_subcommands, so this is a no-op.
 func printSubcommandHelp(c *Context, res envelope.Result) {
-	if c.Mode != ModeHuman || res.Err == nil {
+	if c.mode() != ModeHuman || res.Err == nil {
 		return
 	}
 	var b strings.Builder

@@ -90,6 +90,34 @@ type Context struct {
 	Dir     string
 	Stdout  io.Writer
 	Stderr  io.Writer
+
+	// stdoutTTY is kept so the mode can be re-derived after a command has parsed
+	// its own flags. See mode.
+	stdoutTTY bool
+
+	// payloadWritten says the command has already written its own primary
+	// output, so emit must not add the envelope behind it. `ocaw schema` writes
+	// the document itself, because the document is the point of the command;
+	// writing the envelope as well would make `ocaw schema task.list > f.json`
+	// produce a file that is a schema followed by an envelope, which is neither.
+	payloadWritten bool
+}
+
+// wrotePayload tells emit that this command has already written the primary
+// output. Diagnostics and the exit code are unaffected.
+func (c *Context) wrotePayload() { c.payloadWritten = true }
+
+// mode re-derives the output mode from the current options and returns it.
+//
+// It has to be callable more than once, and late. A command with subcommands
+// parses its own flags — `ocaw task set 1 --status done --quiet` — after the
+// dispatcher has already chosen a mode, so a mode resolved once up front is
+// stale by the time the command needs it. The earlier version resolved it
+// before calling run, which meant `--quiet` and `--output` after a subcommand
+// were parsed and then ignored: the command announced success on stdout anyway.
+func (c *Context) mode() Mode {
+	c.Mode = ResolveMode(c.Options, c.stdoutTTY)
+	return c.Mode
 }
 
 type humanFunc func(c *Context, env envelope.Envelope, w io.Writer) error
@@ -122,6 +150,7 @@ type command struct {
 
 var commands = []*command{
 	versionCommand,
+	schemaCommand,
 	workflowCommand,
 	reportCommand,
 	taskCommand,
@@ -174,7 +203,7 @@ func newFlagSet(name string) *flag.FlagSet {
 // Main runs ocaw and returns the process exit code. It never panics and never
 // writes to os.Stderr directly, so the whole CLI is testable in-process.
 func Main(argv []string, stdout, stderr io.Writer, stdoutTTY bool) int {
-	ctx := &Context{Stdout: stdout, Stderr: stderr}
+	ctx := &Context{Stdout: stdout, Stderr: stderr, stdoutTTY: stdoutTTY}
 	return run(ctx, argv, stdoutTTY)
 }
 
@@ -299,8 +328,10 @@ func dispatch(ctx *Context, cmd *command, args []string, stdoutTTY bool) int {
 		}
 	}
 
-	ctx.Mode = ResolveMode(ctx.Options, stdoutTTY)
-	return emit(ctx, ctx.Mode, cmd.run(ctx, cfs.Args()), cmd)
+	// The command parses its own flags, which may include the globals, so the
+	// mode is resolved after it returns rather than before.
+	res := cmd.run(ctx, cfs.Args())
+	return emit(ctx, ctx.mode(), res, cmd)
 }
 
 func suggestCommand(name string) string {
@@ -529,6 +560,18 @@ func renderDiagnostics(env envelope.Envelope) string {
 
 func emit(ctx *Context, mode Mode, res envelope.Result, cmd *command) int {
 	env := res.Envelope()
+	if ctx.payloadWritten {
+		// The command already wrote its own payload. Diagnostics and the exit
+		// code are still owed, and everything else is the command's business.
+		if mode != ModeJSON {
+			if diag := renderDiagnostics(env); diag != "" {
+				if _, err := io.WriteString(ctx.Stderr, diag); err != nil {
+					return envelope.CatInternal.Exit()
+				}
+			}
+		}
+		return env.ExitCode()
+	}
 	var (
 		human        humanFunc
 		humanOnError bool

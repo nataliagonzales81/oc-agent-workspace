@@ -112,7 +112,7 @@ func runReport(c *Context, args []string) envelope.Result {
 	// `ocaw report --format md > file.md` is the documented way to get a copy,
 	// and making that require a terminal would be a strange rule. Every other
 	// combination still follows §4.1, including --quiet and --output.
-	if format == reportFormatMD && resErr == nil && c.Options.Output == "" && c.Mode != ModeQuiet {
+	if format == reportFormatMD && resErr == nil && c.Options.Output == "" && c.mode() != ModeQuiet {
 		if _, werr := io.WriteString(c.Stdout, data.Markdown); werr != nil {
 			res.Data = nil
 			res.Err = writeFailure("write the markdown to stdout", werr)
@@ -128,7 +128,7 @@ func reportRun(c *Context, layout *workspace.Layout, format string) (reportData,
 		Prev:   string(report.StatusMissing),
 		DryRun: c.Options.DryRun,
 		Notes:  []string{},
-		Mode:   c.Mode.String(),
+		Mode:   c.mode().String(),
 	}
 
 	var warnings []envelope.Warning

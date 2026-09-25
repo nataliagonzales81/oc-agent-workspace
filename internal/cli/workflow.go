@@ -493,7 +493,7 @@ const workflowSubcommandHelp = "Subcommands:\n" +
 // was available. In JSON mode the envelope already carries
 // available_subcommands, so this is a no-op there.
 func printWorkflowHelp(c *Context) {
-	if c.Mode != ModeHuman {
+	if c.mode() != ModeHuman {
 		return
 	}
 	_, _ = io.WriteString(c.Stdout, workflowSubcommandHelp)
