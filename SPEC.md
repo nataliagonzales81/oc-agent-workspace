@@ -539,12 +539,50 @@ command keeps stdout empty on failure.
 ### `ocaw status`
 
 ```
-ocaw status [--task <id>] [--json]
+ocaw status [--task <id>]
 ```
 
 One-shot workspace summary: project type, counts by status, ready-queue (tasks whose deps
-are all satisfied), blocked tasks, last verification result, budget. `ocaw status` is the
-command an agent runs first to orient, and must be cheap — no subprocesses, no network.
+are all satisfied), blocked tasks, the last verification result, and budget spend. `ocaw
+status` is the command an agent runs first to orient, and must be cheap — no subprocesses,
+no network.
+
+`data` carries `root`, `project_type`, `verify_cmd`, `counts`, `total`, `ready`, `blocked`,
+`next`, `stuck`, `stuck_tasks`, `last_verification`, `budget`, `acceptance`, `render`,
+`history_truncated`, `task`, and `notes`. `next` and `task` are both always present: `next`
+is null when the queue is empty, `task` is null unless `--task` named one. Two nullable
+keys that mean different things, rather than one overloaded key.
+
+`stuck` leads both renderings. It is the single most actionable fact in the file, and a
+summary that buries it under a table has failed at the only job it has. `stuck` carries the
+full `state.Stuck` detail — task, gate, when the run began, how many identical attempts —
+not just a flag, because "task 2 is stuck" without "on which gate, since when" is not
+actionable.
+
+`render` reports whether `WORKFLOW_STATE.md` still matches `state.json` (`current`, `stale`,
+`edited`, `foreign`, `missing`). A human or an agent reads that file and believes it, so
+knowing it has drifted is part of orienting.
+
+**No subprocesses, and no lock.** It reads `state.json`, `runs.jsonl`, `agent.yaml`, and
+the generated markdown, and nothing else. Two tests hold that: a runtime one that puts a
+poisoning `git`/`go`/`sh` on `PATH` and asserts no marker appears, and a source-level one
+asserting that `internal/{state,report,workspace,yaml,envelope,cli}` cannot reach `os/exec`
+at all and that `internal/verify/run.go` is the only file in ocaw that builds a command.
+The lock is not taken, because an agent orienting while another one works would otherwise
+be told the workspace is busy when the only thing it wanted to know was where to start.
+
+**Bounded.** `runs.jsonl` is append-only and its size is not under ocaw's control, so
+`state.LoadRunsTail` reads at most `state.MaxHistoryBytes` (1 MiB) from the end, starting
+at the first line boundary in the window so a partial record is never parsed. The payload
+carries `history_truncated` and a note says so, because presenting a tail as the whole log
+is the failure mode. The trailing run of identical hashes is at the end of the file, which
+is exactly what a tail read keeps, so a truncated history reaches the same stuck verdict as
+a complete one — provided the window holds `StuckThreshold` records. It does: a record is
+at most `MaxOutputBytes` plus a line of fields, so the default holds hundreds.
+
+`--task <id>` adds `unmet_deps`, `dependents`, per-gate outcome and attempt count, the last
+ten attempts for that task, and whether it is runnable — enough to decide what to do about
+one task without reading the whole DAG.
 
 ### `ocaw task`
 

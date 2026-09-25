@@ -548,6 +548,11 @@ func TestInitHoldsTheLockWhileRunning(t *testing.T) {
 	}
 }
 
+// nowRFC is the timestamp a *held* lock must carry: the staleness check reads
+// the recorded time, not the mtime, so a lock stamped at midnight looks hours
+// old and gets broken instead of respected.
+func nowRFC() string { return time.Now().UTC().Format(time.RFC3339) }
+
 func hostName(t *testing.T) string {
 	t.Helper()
 	host, err := os.Hostname()

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -149,4 +150,70 @@ func Decode(raw []byte) (*State, *Error) {
 	}
 	s.normalise()
 	return &s, nil
+}
+
+// MaxHistoryBytes bounds how much of runs.jsonl a reader will load.
+//
+// The log is append-only and never rewritten, so it is the one file in the
+// workspace whose size is not under ocaw's control: a machine that runs gates
+// in a loop for a month accumulates tens of thousands of records. Loading all
+// of them to answer "is anything stuck" is work that grows forever for an answer
+// that only ever depends on the tail — stuck detection compares consecutive
+// trailing attempts, and "the last verification result" is by definition the last
+// record.
+const MaxHistoryBytes = 1 << 20
+
+// LoadRunsTail reads at most maxBytes from the end of the run log.
+//
+// A zero maxBytes uses MaxHistoryBytes. The second return value reports whether
+// records were dropped, so a caller can say so rather than presenting a truncated
+// history as a complete one.
+//
+// The read starts at the first newline inside the window, so the first parsed
+// record is always whole. A record whose first bytes were cut off would otherwise
+// parse into a Run with empty task and gate names, and that phantom would be
+// indistinguishable from a real record in the stuck comparison.
+func LoadRunsTail(l *workspace.Layout, maxBytes int) (runs []Run, truncated bool, err error) {
+	if maxBytes <= 0 {
+		maxBytes = MaxHistoryBytes
+	}
+	f, err := os.Open(l.RunsJSONL())
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	defer f.Close()
+
+	info, err := f.Stat()
+	if err != nil {
+		return nil, false, err
+	}
+	size := info.Size()
+	if size > int64(maxBytes) {
+		truncated = true
+		if _, err := f.Seek(size-int64(maxBytes), io.SeekStart); err != nil {
+			return nil, false, err
+		}
+	}
+	raw, err := io.ReadAll(f)
+	if err != nil {
+		return nil, false, err
+	}
+	if truncated {
+		// Drop the leading partial line, and the newline that ended it.
+		if nl := bytes.IndexByte(raw, '\n'); nl >= 0 {
+			raw = raw[nl+1:]
+		} else {
+			// No line boundary in the window at all: one record longer than the
+			// budget. Report nothing rather than a fragment.
+			return nil, true, nil
+		}
+	}
+	parsed, err := ParseRuns(raw)
+	if err != nil {
+		return nil, truncated, err
+	}
+	return parsed, truncated, nil
 }

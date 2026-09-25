@@ -125,6 +125,7 @@ var commands = []*command{
 	taskCommand,
 	verifyCommand,
 	initCommand,
+	statusCommand,
 	doctorCommand,
 }
 
