@@ -9,6 +9,23 @@ All notable changes to this project are recorded here. The format follows
 Nothing yet. The next change that alters a payload or an exit code will appear
 here, and will come with a schema `@major` bump where the contract says so.
 
+## [0.1.1] - 2026-09-26
+
+### Fixed
+
+**The README's install command did not work.** `go install
+github.com/nataliagonzales81/oc-agent-workspace@latest` fails with *does not
+contain package* — the module root has no Go package, because the tool lives
+under `cmd/`. The install line needs `/cmd/ocaw`, which is now what the README
+says, with the reason.
+
+It shipped in `v0.1.0` and was found by running the install rather than reading
+it. `TestReadmeExamplesRunAsWritten` executes every `ocaw` line in the README
+and could not catch it, because `go install` is not an `ocaw` line — the one line
+a first-time user runs first was the one line nothing tested. There is now a test
+that resolves the install path against the repository and fails if it names a
+directory with no `package main` in it.
+
 ## [0.1.0] - 2026-09-26
 
 The first complete build. Fourteen tasks in a dependency order, each leaving
@@ -85,5 +102,6 @@ Six defects the tests caught that reading the code would not have:
   discovery. `ocaw doctor` reports it as stale rather than re-detecting it.
 - `lint_cmd` is recorded only for Go, where `go vet` ships with the toolchain.
 
-[Unreleased]: https://github.com/nataliagonzales81/oc-agent-workspace/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/nataliagonzales81/oc-agent-workspace/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/nataliagonzales81/oc-agent-workspace/releases/tag/v0.1.1
 [0.1.0]: https://github.com/nataliagonzales81/oc-agent-workspace/releases/tag/v0.1.0

@@ -13,8 +13,12 @@ its health, track a task DAG, run verification, and report.
 
 ## Install
 
+The `/cmd/ocaw` suffix is required. The module root holds no Go package — the
+tool lives under `cmd/`, as a command should — so `go install` needs the full
+package path:
+
 ```sh
-go install github.com/nataliagonzales81/oc-agent-workspace@latest
+go install github.com/nataliagonzales81/oc-agent-workspace/cmd/ocaw@latest
 ```
 
 Pin a version if you are writing anything that has to keep working — the payload
@@ -22,7 +26,7 @@ schema is versioned independently of the binary, so `@latest` is a moving target
 in a way most tools are not:
 
 ```sh
-go install github.com/nataliagonzales81/oc-agent-workspace@v0.1.0
+go install github.com/nataliagonzales81/oc-agent-workspace/cmd/ocaw@v0.1.1
 ```
 
 `ocaw version` reports the version, the Go toolchain it was built with, the

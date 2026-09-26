@@ -1022,3 +1022,77 @@ func TestEveryAcceptanceCriterionIsMapped(t *testing.T) {
 		}
 	}
 }
+
+// TestReadmeInstallPathResolvesToAPackage closes the gap that let a broken
+// install command ship in v0.1.0.
+//
+// TestReadmeExamplesRunAsWritten executes every `ocaw` line in the README, and
+// it could not catch that one, because `go install` is not an `ocaw` line. The
+// line a first-time user runs *first* was therefore the line nothing tested, and
+// it named a path that does not resolve:
+//
+//	go: .../oc-agent-workspace@v0.1.0: module ... found, but does not contain
+//	package github.com/nataliagonzales81/oc-agent-workspace
+//
+// The module root has no Go package, because the tool lives under cmd/. This
+// resolves the path the README actually prints against the repository and
+// requires a `package main` in the directory it names, so the mistake cannot be
+// made again without the test failing.
+func TestReadmeInstallPathResolvesToAPackage(t *testing.T) {
+	root := moduleRoot(t)
+	readme := read(t, filepath.Join(root, "README.md"))
+
+	install := regexp.MustCompile(`(?m)^go install (\S+?)@\S+\s*$`)
+	matches := install.FindAllStringSubmatch(readme, -1)
+	if len(matches) == 0 {
+		t.Fatal("the README has no `go install` line to check")
+	}
+
+	module := ""
+	for _, line := range strings.Split(read(t, filepath.Join(root, "go.mod")), "\n") {
+		if strings.HasPrefix(line, "module ") {
+			module = strings.TrimSpace(strings.TrimPrefix(line, "module "))
+		}
+	}
+	if module == "" {
+		t.Fatal("could not read the module path from go.mod")
+	}
+
+	seen := map[string]bool{}
+	for _, m := range matches {
+		path := m[1]
+		seen[path] = true
+
+		rel, found := strings.CutPrefix(path, module)
+		if !found {
+			t.Errorf("install path %q is not under the module %q", path, module)
+			continue
+		}
+		rel = strings.Trim(rel, "/")
+		dir := root
+		if rel != "" {
+			dir = filepath.Join(root, rel)
+		}
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Errorf("install path %q does not resolve to a directory: %v", path, err)
+			continue
+		}
+		main := false
+		for _, e := range entries {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
+				continue
+			}
+			if strings.Contains(read(t, filepath.Join(dir, e.Name())), "package main") {
+				main = true
+			}
+		}
+		if !main {
+			t.Errorf("install path %q resolves to %s, which has no package main; "+
+				"go install would fail with \"does not contain package\"", path, rel)
+		}
+	}
+	if len(seen) == 1 {
+		t.Log("note: every install line names the same path")
+	}
+}
