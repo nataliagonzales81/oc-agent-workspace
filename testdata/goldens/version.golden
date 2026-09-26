@@ -1,1 +1,1 @@
-{"ok":true,"command":"version","data":{"version":"dev","go_version":"go1.27.1","commit":"unknown","dirty":false,"schema_max":1},"error":null,"warnings":[],"schema":"ocaw/version@1"}
+{"ok":true,"command":"version","data":{"version":"dev","go_version":"<GO>","commit":"unknown","dirty":false,"schema_max":1},"error":null,"warnings":[],"schema":"ocaw/version@1"}

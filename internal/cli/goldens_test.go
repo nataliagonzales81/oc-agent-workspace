@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -52,19 +53,29 @@ type goldenCase struct {
 // timestamp in a field added tomorrow is covered without a second edit.
 var timestamp = regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})`)
 
-// normalise replaces the two things that legitimately differ between runs and
+// normalise replaces the three things that legitimately differ between runs and
 // nothing else.
 //
 // The root is the workspace's own path, which changes on every run because the
 // harness runs in a fresh temporary directory. Replacing the exact string is
-// safe: no other value in an envelope can contain it. Whitespace, key order and
-// spelling are all left alone, because detecting those is the point — a
-// pretty-printer change is a diff here.
+// safe: no other value in an envelope can contain it.
+//
+// The Go version is the toolchain that happened to compile the test binary. This
+// one was found by a version matrix, not by reading the code: a golden locked
+// `go1.27.1`, and every other byte matched on 1.22. `runtime.Version()` is
+// always a function of the compiler, so a harness that pins it is a harness that
+// only passes on one machine. As with the root, the substitution is on an exact
+// value, so renaming or retyping the field still fails the golden — only the
+// value moves.
+//
+// Whitespace, key order and spelling are all left alone, because detecting those
+// is the point: a pretty-printer change is a diff here.
 func normalise(raw []byte, dir string) string {
 	s := string(raw)
 	if dir != "" {
 		s = strings.ReplaceAll(s, dir, "<ROOT>")
 	}
+	s = strings.ReplaceAll(s, runtime.Version(), "<GO>")
 	return timestamp.ReplaceAllString(s, "<TS>")
 }
 

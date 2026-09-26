@@ -924,10 +924,19 @@ means "your request contradicts the state", and an agent recovers from them diff
     `internal/doctor` (which resolves one on `PATH` and starts nothing). Weakening either rule
     so one suite could hold both would lose the narrower one.
 14. A goldens harness records the exact bytes of every command's envelope under
-    `testdata/goldens/`, compared line for line. Two things are substituted before
-    the comparison, and nothing else: the workspace's own path, and RFC3339
-    timestamps. Whitespace, key order and spelling are all left alone, because
-    detecting those is the point — a pretty-printer change is a diff.
+    `testdata/goldens/`, compared line for line. Three things are substituted before
+    the comparison, and nothing else: the workspace's own path, RFC3339 timestamps, and
+    the Go version that compiled the binary. Whitespace, key order and spelling are all
+    left alone, because detecting those is the point — a pretty-printer change is a diff.
+
+    Each substitution replaces an **exact value**, not a pattern, so renaming a field or
+    changing its type still fails the golden; only the value moves. The Go version was not
+    an anticipated substitution: `runtime.Version()` is always a function of the compiler,
+    the golden recorded `go1.27.1`, and a Go version matrix failed on that one field and
+    nothing else. The other two of `version`'s three varying fields — the VCS stamp and
+    `dirty` — are constant under `go test`, because a test binary carries no VCS
+    information, which is why they were never a problem and why checking that reasoning
+    against a real toolchain was worth the matrix.
 
     The goldens are **stricter than the schemas**, on purpose. `additionalProperties:
     true` is what a *consumer* of a released payload wants: a newer ocaw that added
