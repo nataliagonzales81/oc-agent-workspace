@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -148,6 +149,12 @@ func runWorkflow(c *Context, args []string) envelope.Result {
 	workflowEnvState := &workflowEnv{flags: fs}
 	rest, parseErr := parseInterspersed(fs, args[1:])
 	if parseErr != nil {
+		// A leaf asking for help is a success. It used to be reported as a
+		// `usage` refusal whose hint was the argv that had just failed, so the
+		// envelope offered a fix that reproduced the envelope.
+		if errors.Is(parseErr, flag.ErrHelp) {
+			return subcommandHelp(c, res, workflowCommandName, sub.name, sub.summary, fs)
+		}
 		res.Err = envelope.Errorf(
 			envelope.CodeUsage,
 			"ocaw workflow "+sub.name+" --help",

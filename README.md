@@ -64,11 +64,12 @@ ocaw workflow show
 ocaw workflow accept a1 --yes
 ```
 
-`ocaw <command> --help` lists the global flags and the subcommand names, but not
-each subcommand's own flags. Known gap: subcommand-level `--help`
-(`ocaw task set --help`) is refused as `unknown_command`, so `--id`, `--title`,
-`--agent`, `--tier`, `--status`, `--dep`, `--gate`, `--note`, `--ready` and
-`--blocked` are currently undiscoverable from the CLI. See issue #22.
+`ocaw <command> --help` lists a command's subcommands and the global flags.
+`ocaw <command> <subcommand> --help` lists that subcommand's own flags, which is
+where `--id`, `--title`, `--agent`, `--tier`, `--status`, `--dep`, `--gate`,
+`--note`, `--ready`, `--blocked`, `--force`, `--shell` and `--timeout` are
+documented. `ocaw schema` has no subcommands, so `ocaw schema <name> --help`
+lists the available schemas.
 
 `ocaw --help` lists every command, and `ocaw <command> --help` lists a command's
 subcommands and the global flags. The contract, state schema, exit codes, and

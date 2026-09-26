@@ -447,9 +447,20 @@ func (cmd *command) flagHelp() string {
 	// A fresh Options so a command's defaults never leak into the help text.
 	ctx := &Context{}
 	cmd.setup(fs, ctx)
+	own := ownFlagHelp(fs)
+	if own == "" {
+		return globalFlagHelp()
+	}
+	return "Flags:\n" + own + "\n" + globalFlagHelp()
+}
+
+// ownFlagHelp lists the flags in fs that are not globals.
+//
+// The globals are omitted because every help surface lists them once, at the
+// bottom. A caller that wants them calls globalFlagHelp.
+func ownFlagHelp(fs *flag.FlagSet) string {
 	var b strings.Builder
 	fs.VisitAll(func(f *flag.Flag) {
-		// Skip the globals: they are listed once, below.
 		if isGlobalFlagName(f.Name) {
 			return
 		}
@@ -459,10 +470,44 @@ func (cmd *command) flagHelp() string {
 		}
 		fmt.Fprintf(&b, "  %-18s %s\n", name, f.Usage)
 	})
-	if b.Len() == 0 {
-		return globalFlagHelp()
+	return b.String()
+}
+
+// subcommandUsage is the full help text for one leaf: its usage line, what it is
+// for, the flags that are specific to it, and then the globals.
+//
+// This exists because a leaf could not be asked for help at all. `ocaw task
+// --help` listed the subcommand names and the globals, so the ten flags `task`
+// registers — --id, --title, --agent, --gate and the rest — appeared on no help
+// surface, and `ocaw task set --help` returned a usage error whose hint was the
+// command that had just failed. An agent following that hint loops.
+//
+// The flags specific to the leaf are the whole reason to ask a leaf rather than
+// its group, so they come first.
+func subcommandUsage(group, name, summary string, fs *flag.FlagSet) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "ocaw %s %s [flags]\n\n%s\n\n", group, name, summary)
+	if own := ownFlagHelp(fs); own != "" {
+		b.WriteString("Flags:\n" + own + "\n")
 	}
-	return "Flags:\n" + b.String() + "\n" + globalFlagHelp()
+	b.WriteString(globalFlagHelp())
+	return b.String()
+}
+
+// subcommandHelp turns a leaf's flag.ErrHelp into that leaf's usage.
+//
+// It is a success, not a refusal: help was requested and is what was delivered.
+// The old behaviour reported it as `usage` and pointed the hint back at the same
+// argv, so the envelope said "here is how to fix this" and the fix reproduced
+// the envelope.
+func subcommandHelp(c *Context, res envelope.Result, group, name, summary string, fs *flag.FlagSet) envelope.Result {
+	usage := subcommandUsage(group, name, summary, fs)
+	res.Err = nil
+	res.Data = map[string]any{"subcommand": name, "usage": usage}
+	if c.mode() == ModeHuman {
+		_, _ = io.WriteString(c.Stdout, usage)
+	}
+	return res
 }
 
 var globalFlagSet = func() map[string]bool {

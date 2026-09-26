@@ -3,6 +3,7 @@ package cli
 import (
 	"embed"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -243,6 +244,16 @@ func runSchema(c *Context, args []string) envelope.Result {
 	registerGlobals(fs, &c.Options)
 	rest, parseErr := parseInterspersed(fs, args)
 	if parseErr != nil {
+		// `schema` has no subcommand table — its argument is a schema name — so
+		// there is no per-key help, and the listing is the answer.
+		//
+		// Recursing with no arguments gets it without reaching for the group's
+		// own help: helpText looks the command up in the `commands` table, and
+		// `commands` contains this function, so calling it from here is an
+		// initialisation cycle rather than a runtime lookup.
+		if errors.Is(parseErr, flag.ErrHelp) {
+			return runSchema(c, nil)
+		}
 		res.Err = envelope.Errorf(
 			envelope.CodeUsage,
 			"ocaw schema --help",

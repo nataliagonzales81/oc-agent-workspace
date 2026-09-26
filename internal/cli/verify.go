@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -205,6 +206,9 @@ func runVerify(c *Context, args []string) envelope.Result {
 
 	rest, parseErr := parseInterspersed(fs, head)
 	if parseErr != nil {
+		if errors.Is(parseErr, flag.ErrHelp) {
+			return subcommandHelp(c, res, verifyCommandName, sub.name, sub.summary, fs)
+		}
 		res.Err = envelope.Errorf(envelope.CodeUsage,
 			"ocaw verify "+sub.name+" --help", "%s", parseErr.Error())
 		return res

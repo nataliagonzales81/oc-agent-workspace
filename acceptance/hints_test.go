@@ -375,34 +375,67 @@ func TestReadmePinnedVersionsExist(t *testing.T) {
 // because it does not hold yet. Fixing the dispatcher turns it on; nothing else
 // has to change.
 func TestSubcommandHelpIsReachable(t *testing.T) {
-	t.Skip("issue #22: subcommand-level --help is refused as unknown_command")
-
 	dir := managedDir(t)
-	// Each group's own flags, so the check is against what the code registers
-	// rather than a list maintained alongside it.
+
+	// Every leaf that registers its own flags, and what it must list. These are
+	// the flags that were undiscoverable: they appeared on no help surface, and
+	// asking a leaf for help returned a usage error whose hint was the command
+	// that had just failed, so an agent following the hint looped.
 	for _, c := range []struct {
-		group string
+		argv  []string
 		flags []string
 	}{
-		{"task", []string{"--id", "--title", "--agent", "--tier", "--status", "--dep", "--gate", "--note", "--ready", "--blocked"}},
-		{"workflow", []string{"--request", "--scope", "--constraint", "--accept"}},
-		{"verify", nil},
+		{[]string{"task", "add"}, []string{"--id", "--title", "--agent", "--tier", "--status", "--dep", "--gate", "--note"}},
+		{[]string{"task", "set"}, []string{"--title", "--agent", "--tier", "--status", "--gate", "--note"}},
+		{[]string{"task", "dep"}, []string{"--add", "--rm"}},
+		{[]string{"task", "list"}, []string{"--status", "--ready", "--blocked"}},
+		{[]string{"verify", "run"}, []string{"--task", "--gate", "--timeout", "--force", "--shell", "--verbose"}},
+		{[]string{"workflow", "set"}, []string{"--request", "--scope", "--constraint", "--accept"}},
+		{[]string{"workflow", "accept"}, []string{"--done", "--not-done"}},
+		// `schema` has no subcommand table, so its answer is the listing.
+		{[]string{"schema", "task"}, nil},
 	} {
-		t.Run(c.group, func(t *testing.T) {
-			r := run(t, dir, c.group, "--help")
-			if r.code != 0 {
-				t.Fatalf("ocaw %s --help exits %d: %s", c.group, r.code, r.env.Err.Message)
+		t.Run(strings.Join(c.argv, " "), func(t *testing.T) {
+			r := run(t, dir, append(c.argv, "--help")...)
+			if r.code != 0 || r.env.Err != nil {
+				t.Fatalf("ocaw %s --help exits %d (%s): %s",
+					strings.Join(c.argv, " "), r.code, r.env.Err.Code, r.env.Err.Message)
 			}
 			usage, _ := r.data["usage"].(string)
+			if c.flags == nil {
+				// `schema` answers with the listing instead. Its payload is a
+				// fixed struct described by ocaw/schema@1, and adding a `usage`
+				// key to it would change that schema and every golden — and a
+				// payload that is sometimes a struct and sometimes a map is
+				// exactly what §4.2 forbids. So the listing is the answer, and
+				// the difference is deliberate rather than an omission.
+				// JSON numbers decode as float64, not int.
+				n, _ := r.data["count"].(float64)
+				if int(n) == 0 {
+					t.Fatalf("ocaw %s --help lists no schemas", strings.Join(c.argv, " "))
+				}
+				return
+			}
+			if usage == "" {
+				t.Fatalf("ocaw %s --help has no usage", strings.Join(c.argv, " "))
+			}
 			for _, f := range c.flags {
 				if !strings.Contains(usage, f) {
-					t.Errorf("ocaw %s --help omits %s", c.group, f)
+					t.Errorf("ocaw %s --help omits %s", strings.Join(c.argv, " "), f)
 				}
 			}
-			// And a leaf must be able to ask for its own help.
-			leaf := run(t, dir, c.group, "list", "--help")
-			if leaf.code != 0 {
-				t.Errorf("ocaw %s list --help exits %d: %s", c.group, leaf.code, leaf.env.Err.Code)
+		})
+	}
+
+	// A leaf that takes no flags still has to answer, rather than refusing.
+	for _, leaf := range [][]string{
+		{"task", "next"}, {"task", "rm"}, {"task", "show"},
+		{"verify", "run"}, {"workflow", "show"},
+	} {
+		t.Run(strings.Join(leaf, " ")+" no-flags", func(t *testing.T) {
+			r := run(t, dir, append(leaf, "--help")...)
+			if r.env.Err != nil {
+				t.Errorf("ocaw %s --help refuses with %s", strings.Join(leaf, " "), r.env.Err.Code)
 			}
 		})
 	}
