@@ -15,6 +15,7 @@ Every claim about what ships is verified against the running binary, not recalle
 |---|---|
 | D3 | `bad=a && b` → `validation_failed`, *"column 3 holds \"&&\", which is a shell operator"*; `'TestA && TestB'` and `'TestSub\|^other$'` both stored intact |
 | D3 | a refused `add` leaves **no task behind** — the whole add is refused, not half-applied |
+| D3 | `&& \| > $` are refused with a column number and a SPEC §9.4 citation; the same characters inside quotes are inert. The stored `cmd` keeps its quote characters, and the recorded command has them **stripped**, so `go test -run 'TestA && TestB' ./...` is recorded as `go test -run TestA && TestB ./...` — the record no longer distinguishes the quoted form from the unquoted one |
 | D4 | `--gate` registered on exactly two commands: `add` and `set` |
 | D5 | `--accept "a=1 and b=2"` → one criterion `{id: a1, text: "a=1 and b=2"}` — never split |
 | D6 | 9 of 9 embedded documents are `additionalProperties: true` |
@@ -84,6 +85,38 @@ the same characters inside quotes are inert and permitted, so
 Note this is a **loosening** from the original v1 rule, made in task #7 when `checkGates`
 and the new `verify.Tokenize` were consolidated into one parser.
 
+### What option A costs, measured
+
+Reversing D3 is still one function. Choosing A is not free, and the cost was found
+by running the gate rather than reading it.
+
+`go test` exits **0** when its `-run` pattern matches nothing:
+
+```
+$ ocaw task add --id 1 --title f --gate "t=go test -run 'TestA && TestB' ./..."
+$ ocaw verify run --task 1        ->  "status": "pass", "exit": 0
+
+$ go test -run 'TestA && TestB' ./...
+ok  	example.com/x	0.534s	[no tests to run]     exit 0
+$ go test -run 'TestA' ./...
+ok  	example.com/x	0.534s                      exit 0
+```
+
+Two gates, identical exit code, identical `ok` line, one of which ran nothing.
+ocaw reports a pass for both, and the `[no tests to run]` marker is in the output
+it already captures and discards.
+
+Quoting is not the cause — the argv handed to `go test` is correct. Quoting is
+what makes this vacuous gate expressible: `-run 'A && B'` is a valid regex
+matching no test, and the strict rule would have refused it. Option A traded a
+loud refusal for a silent false pass, and a false pass in a verification tool is
+worse than a refusal.
+
+**So A is only correct together with #25.** Decide D3 and #25 together: with #25
+fixed, A is right, because nothing is quietly unchecked. Without it, B is right
+regardless, because the failure mode is invisible. This is the one decision on the
+list whose answer is not independent of an open bug.
+
 **Reversal cost:** A → B is one function and a golden. B → A likewise. No schema impact
 either way, since gate `cmd` is already a free-form string.
 
@@ -130,6 +163,33 @@ strict rule never splits a sentence, which is the conservative direction.
 
 **Reversal cost:** A → B is a flag and a golden. Cheap. The reason to decide now rather than
 later is that B is additive, so doing it after 1.0.0 is a minor version.
+
+### The part that is decided, whichever option wins
+
+There is **no way to create an acceptance item from the CLI without going through
+`workflow set`**, and `workflow accept` only ticks items that already exist. On a
+fresh `init` the list is empty, so:
+
+```
+$ ocaw workflow accept a1 --yes
+{"error":{"code":"entry_not_found","message":"no acceptance item with id \"a1\"",
+ "hint":"ocaw workflow show"}}
+```
+
+This is not a bug — refusing to accept an id that does not exist is the whole
+point — but it is a two-call sequence, and the README did not say so until the
+#16 inventory found an example that assumed otherwise. The working sequence is:
+
+```
+ocaw workflow set --accept "a1=go test ./... passes"
+ocaw workflow show
+ocaw workflow accept a1 --yes
+```
+
+So the answer to D5 as asked — *can a custom scheme arrive in one call* — is **no
+under A, yes under B**, and under both the item must be created before it can be
+accepted. If one call is the actual goal, B is the only option that gets there,
+and the gap is the create/accept split rather than the id syntax.
 
 **Answer:** _
 
