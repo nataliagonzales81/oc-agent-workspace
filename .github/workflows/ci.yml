@@ -43,9 +43,9 @@ jobs:
         go: ['1.22.x', 'stable']
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: ${{ matrix.go }}
           # Nothing is vendored, because there are no dependencies. Caching the
@@ -80,11 +80,15 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: stable
+          # Same reason as the gate job: no dependencies, so no go.sum, so
+          # there is nothing to restore. setup-go defaults to cache:true and
+          # warns on every run when the file it wants is absent.
+          cache: false
 
       - name: CGO_ENABLED=0 produces a static linux binary
         # Assert the recorded build setting rather than grepping the bytes. A
