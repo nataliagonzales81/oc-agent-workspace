@@ -1,0 +1,110 @@
+# The gate, run on every push instead of by hand.
+#
+# It was run by hand for sixteen commits, which means nothing would have caught
+# a regression on main until a human remembered to look. This is that fix, and it
+# is deliberately the same set of commands the v1 build was verified with rather
+# than a tidier subset: a gate that checks less than you check by hand is a gate
+# that gives false confidence.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A new push supersedes an in-flight run on the same ref. The golden suite is
+# ~50s per matrix leg, so a stack of pushes on a topic branch would otherwise
+# spend the whole runner budget re-testing commits nobody is asking about.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: go ${{ matrix.go }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    strategy:
+      # fail-fast off: a failure on the oldest supported Go is more interesting
+      # than a duplicate failure on both, and seeing them separately costs
+      # nothing at this size.
+      fail-fast: false
+      matrix:
+        # go.mod declares 1.22, and 1.22 is in the matrix because a declared
+        # minimum nobody builds is a minimum that is a guess. The version
+        # matrix immediately paid for itself: the goldens recorded
+        # `go1.27.1` in data.go_version and matched on nothing else, because
+        # runtime.Version() is a function of the compiler. That was a bug in
+        # the harness, found the first time CI ran — see normalise().
+        go: ['1.22.x', 'stable']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          # Nothing is vendored, because there are no dependencies. Caching the
+          # toolchain download and the module cache is still the bulk of the
+          # wall clock on a cold runner.
+          cache: false
+
+      - name: gofmt
+        # -l lists files whose formatting differs; an empty result is the pass.
+        # Not `gofmt -d`, whose diff would bury the file names.
+        run: test -z "$(gofmt -l .)" || { echo '::error::gofmt found unformatted files:'; gofmt -l .; exit 1; }
+
+      - name: build
+        run: go build ./...
+
+      - name: vet
+        run: go vet ./...
+
+      - name: test
+        run: go test ./...
+
+      - name: race
+        # The lock is a single-writer O_EXCL file and the traversal is bounded,
+        # so -race is the only thing that would notice a concurrency mistake in
+        # either. It is also the slowest step, so it runs after the plain suite
+        # has already passed and the cheap failures are out of the way.
+        run: go test -race ./...
+
+  static:
+    name: static and cross builds
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - name: CGO_ENABLED=0 produces a static linux binary
+        # Assert the recorded build setting rather than grepping the bytes. A
+        # pure-Go darwin binary still references libSystem for syscalls, so the
+        # obvious "look for a dynamic loader" check is wrong on the platform
+        # most people develop on — which is exactly what the acceptance suite
+        # learned the hard way.
+        run: |
+          CGO_ENABLED=0 go build -o "$RUNNER_TEMP/ocaw" ./cmd/ocaw
+          go version -m "$RUNNER_TEMP/ocaw" | tee "$RUNNER_TEMP/meta"
+          grep -q 'CGO_ENABLED=0' "$RUNNER_TEMP/meta"
+          if grep -q $'dep\t' "$RUNNER_TEMP/meta"; then
+            echo "::error::the binary has third-party dependencies (SPEC §9.1)"
+            exit 1
+          fi
+
+      - name: cross-compiles for windows and darwin
+        # internal/verify has a proc_other.go fallback behind a //go:build tag.
+        # Nothing in this job runs those binaries; the point is that the tag is
+        # not dead and the package still compiles where Setpgid does not exist.
+        run: |
+          GOOS=windows GOARCH=amd64 go build -o "$RUNNER_TEMP/ocaw.exe" ./cmd/ocaw
+          GOOS=darwin  GOARCH=arm64 go build -o "$RUNNER_TEMP/ocaw-darwin" ./cmd/ocaw
