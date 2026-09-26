@@ -170,6 +170,18 @@ func (s *State) checkDangling() *Error {
 	for _, t := range s.Tasks {
 		for _, dep := range t.Deps {
 			if s.IndexOf(dep) < 0 {
+				// Both ids are in hand, so the hint names a real command.
+				//
+				// "--rm" is right for a dep that is recorded and needs dropping,
+				// which is the persisted case, and harmless for a dep whose `add`
+				// was refused and therefore never written. "--add" would be wrong
+				// here: when the dangling dep comes from a *refused removal*
+				// rather than a typo, the missing task is one that was just
+				// deleted on purpose, and the hint would resurrect it. A hint that
+				// undoes the user's intent is worse than one that does not apply.
+				//
+				// AddTask checks its own supplied deps separately, where the
+				// provenance is known and "--add" is the right advice.
 				return newError(
 					envelope.CodeDepDangling,
 					"ocaw task dep "+t.ID+" --rm "+dep,
@@ -225,8 +237,12 @@ func (s *State) checkAcyclic() *Error {
 		if colour[t.ID] == unvisited {
 			if path := visit(t.ID); path != nil {
 				return newError(
+					// A concrete edge from the cycle, not a template. Any single
+					// edge on the path breaks it, and naming one turns the hint
+					// into a command that can be run as written. A template with
+					// <id> and <dep> in it is pasted literally and fails.
 					envelope.CodeDepCycle,
-					"ocaw task dep <id> --rm <dep>",
+					cycleHint(path),
 					Detail{Task: t.ID, Check: CheckAcyclic, Cycle: path},
 					"dependency cycle: %s", strings.Join(path, " -> "),
 				)
@@ -556,4 +572,16 @@ func plural(n int, one, many string) string {
 		return one
 	}
 	return many
+}
+
+// cycleHint names one real edge of a cycle so the hint can be run as written.
+//
+// The path is a closed walk, so the first two ids are adjacent and removing that
+// edge breaks the cycle. Every other cycle gets a different first edge, so
+// there is no canonical choice to make and no preference to encode.
+func cycleHint(path []string) string {
+	if len(path) < 2 {
+		return "ocaw task list"
+	}
+	return "ocaw task dep " + path[0] + " --rm " + path[1]
 }

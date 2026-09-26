@@ -53,9 +53,26 @@ ocaw report --write
 ocaw schema task
 ```
 
-`ocaw --help` and `ocaw <command> --help` list the full surface, including every subcommand's
-own flags. The contract, state schema, exit codes, and acceptance criteria:
-**[SPEC.md](SPEC.md)**.
+`WORKFLOW_STATE.md` acceptance is recorded separately from task state, because it
+describes the workflow rather than the work in it. Items are created with
+`workflow set` and ticked with `workflow accept`; ids match `a<number>`:
+
+```
+ocaw workflow set --accept "a1=go test ./... passes"
+ocaw workflow set --accept "a2=go vet ./... is clean"
+ocaw workflow show
+ocaw workflow accept a1 --yes
+```
+
+`ocaw <command> --help` lists the global flags and the subcommand names, but not
+each subcommand's own flags. Known gap: subcommand-level `--help`
+(`ocaw task set --help`) is refused as `unknown_command`, so `--id`, `--title`,
+`--agent`, `--tier`, `--status`, `--dep`, `--gate`, `--note`, `--ready` and
+`--blocked` are currently undiscoverable from the CLI. See issue #22.
+
+`ocaw --help` lists every command, and `ocaw <command> --help` lists a command's
+subcommands and the global flags. The contract, state schema, exit codes, and
+acceptance criteria: **[SPEC.md](SPEC.md)**.
 
 ### JSON by default
 

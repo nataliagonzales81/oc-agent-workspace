@@ -73,6 +73,28 @@ func (s *State) AddTask(t Task, now time.Time) *Error {
 		)
 	}
 
+	// A supplied dep that is not in the workspace is caught here, before the
+	// change is applied, and not left to the general invariant.
+	//
+	// The two sites see the same shape — a task naming a dep that does not exist
+	// — and need opposite advice. Here the dep is *newly supplied*, so it is a
+	// typo or a forward reference and the fix is to create the task. In the
+	// invariant, the dep may already be recorded, where the fix is to drop the
+	// edge, or may be missing because a removal was just refused, where dropping
+	// the edge is right and creating the task would resurrect a task the user
+	// deleted on purpose. Only this site knows which case it is, so only this site
+	// can pick the hint.
+	for _, dep := range t.Deps {
+		if s.IndexOf(dep) < 0 {
+			return newError(
+				envelope.CodeDepDangling,
+				"ocaw task add --id "+dep+" --title <s>",
+				Detail{Task: t.ID, Check: CheckDangling, TaskIDs: []string{dep}},
+				"task %q would depend on %q, which is not a task in this workspace", t.ID, dep,
+			)
+		}
+	}
+
 	// The change is applied to a copy and only committed once it is known to be
 	// valid, so a refused add leaves no trace in the state.
 	proposed := s.clone()
@@ -319,9 +341,17 @@ func (s *State) RemoveTask(ids []string) *Error {
 			}
 		}
 		if len(dependents) > 0 {
+			// The blocking task is known, so the hint names it. This used to be a
+			// template — `ocaw task dep <id> --rm <id>` — with a literal <id>, so an
+			// agent following it ran a command that could not parse. It also read as
+			// "drop a dependency called <id>", which is the wrong operation: the fix
+			// is to drop the *dependent's* edge on this task.
+			//
+			// Any one of them breaks the hold, and the list order is the task order,
+			// so the first is as good as any and needs no preference rule.
 			return newError(
 				envelope.CodeDepDangling,
-				"ocaw task dep <id> --rm "+id,
+				"ocaw task dep "+dependents[0]+" --rm "+id,
 				Detail{Task: id, Blocking: dependents},
 				"task %q is still depended on by: %s", id, strings.Join(dependents, ", "),
 			)
