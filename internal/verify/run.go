@@ -52,9 +52,14 @@ const TimeoutNever time.Duration = 0
 type Status string
 
 const (
-	// Pass means the command ran and exited zero.
+	// Pass means the command ran, exited zero, and did not report that it ran
+	// nothing. The third condition is not redundant: `go test` exits 0 when its
+	// -run pattern matches nothing, so exit status alone cannot tell a real pass
+	// from a check that never happened.
 	Pass Status = "pass"
-	// Fail means the command ran and refused, or never started.
+	// Fail means the command ran and refused, never started, or exited zero while
+	// reporting that it ran nothing. Exit is 0 in that last case, because the
+	// command really did exit 0; the output carries the reason.
 	Fail Status = "fail"
 	// Timeout means the command was killed at its deadline. It is distinct from
 	// Fail so `ocaw status` can tell a slow gate from a broken one.
@@ -158,8 +163,24 @@ func Run(req Request) Attempt {
 	}
 
 	if runErr == nil {
-		att.Status = Pass
 		zero := 0
+		// A command that reports it did nothing is not a pass, whatever it
+		// exited with. `go test` exits 0 when its -run pattern matches nothing,
+		// so `go test -run 'TestA && TestB'` and `go test -run TestA` both exit
+		// 0 with the same `ok <pkg>` line, and only the first checked nothing.
+		// The distinction is in the output ocaw already captures, so the gate
+		// reported a verification that never happened.
+		//
+		// Exit stays 0 and is still recorded. The command really did exit 0, and
+		// overwriting it with a non-zero code would be ocaw inventing the
+		// command's verdict — the same reason Timeout leaves Exit nil.
+		if marker, ok := nothingRan(att.Output); ok {
+			att.Status = Fail
+			att.Exit = &zero
+			att.Output = append(att.Output, vacuousNote(marker)...)
+			return att
+		}
+		att.Status = Pass
 		att.Exit = &zero
 		return att
 	}
@@ -210,6 +231,58 @@ func exitNote(code int) []byte {
 
 func startNote(err error) []byte {
 	return []byte("\nocaw: the gate could not be started: " + err.Error() + "\n")
+}
+
+func vacuousNote(marker string) []byte {
+	return []byte("\nocaw: the gate exited 0 but reported that it ran nothing (" +
+		marker + "); a check that did not run is not a pass\n")
+}
+
+// nothingRanMarkers are the substrings a command prints when it succeeded
+// without doing the thing it was asked to do.
+//
+// This is a table, not a rule, and deliberately so. The general problem is that
+// there is no way to tell from an exit code whether work happened, so the only
+// evidence available is the command saying so in its own output. A rule
+// synthesised here would either be wrong for some tool or need a per-tool
+// exception anyway; a table is the honest shape of the problem, and adding an
+// entry is a one-line change with a test.
+//
+// Entries must be unambiguous. A substring that a *successful, useful* run also
+// prints belongs nowhere near this list — see the note on `go test` below.
+//
+// `go test` has two different "nothing" messages and only one of them is a
+// defect:
+//
+//	ok  example.com/x  0.5s  [no tests to run]   the pattern matched nothing.
+//	                                        The tests exist. This is a gap.
+//	?   example.com/x/no-tests  [no test files]  the package has no tests, which
+//	                                        is normal and is what every
+//	                                        `go test ./...` reports somewhere.
+//
+// Failing the second would fail essentially every real Go project, so only the
+// first is listed. The distinction is worth stating because the two read alike
+// and the bug is in reading them alike.
+var nothingRanMarkers = []string{
+	"[no tests to run]",
+}
+
+// RanNothing reports whether out contains a marker meaning the command reported
+// that it did nothing, and which marker it was.
+//
+// Exported because the CLI answers the same question when it explains a failed
+// attempt. Two implementations of "did this gate run anything" would drift, and
+// the drift would show up as a fail with no reason.
+func RanNothing(out []byte) (string, bool) { return nothingRan(out) }
+
+// nothingRan reports whether out contains a marker, and which one.
+func nothingRan(out []byte) (string, bool) {
+	for _, marker := range nothingRanMarkers {
+		if bytes.Contains(out, []byte(marker)) {
+			return marker, true
+		}
+	}
+	return "", false
 }
 
 func itoa(n int) string {

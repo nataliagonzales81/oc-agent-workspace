@@ -450,7 +450,7 @@ func runVerifyRun(c *Context) (verifyData, []envelope.Warning, *envelope.Error) 
 				g.Attempts++
 			}
 		}
-		entry := attemptToData(attempt, record, false, "", verifyFlagsState.verbose)
+		entry := attemptToData(attempt, record, false, vacuousReason(attempt), verifyFlagsState.verbose)
 		// The count is the total, not the number this run produced: "attempt 3"
 		// is only useful if it means the third, ever.
 		entry.Attempts = countRuns(recorded, attempt.TaskID, attempt.Gate)
@@ -830,4 +830,24 @@ func humanVerifyHistory(c *Context, env envelope.Envelope, w io.Writer) error {
 		return err
 	}
 	return nil
+}
+
+// vacuousReason explains an attempt that failed while exiting zero.
+//
+// `status: fail` beside `exit: 0` is otherwise a contradiction the reader has to
+// resolve from a captured output they may not have asked for. The tool already
+// has a place for this — the same `reason` a skipped gate uses — and the other
+// two ways a gate can fail without the command objecting, a timeout and a gate
+// that never started, are both self-describing. This makes the third one so too.
+//
+// The marker is not repeated here. It is in the output, and this says what the
+// output said; quoting it twice invites the two copies to drift.
+func vacuousReason(a verify.Attempt) string {
+	if a.Status != verify.Fail || a.Exit == nil || *a.Exit != 0 {
+		return ""
+	}
+	if _, ok := verify.RanNothing(a.Output); !ok {
+		return ""
+	}
+	return "exited 0 and reported that it ran nothing; a check that did not run is not a pass"
 }

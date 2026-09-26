@@ -440,3 +440,61 @@ func TestSubcommandHelpIsReachable(t *testing.T) {
 		})
 	}
 }
+
+// TestVacuousGateIsNotAPass is the end-to-end form of issue #25, and the reason
+// it is here rather than in the goldens.
+//
+// A golden records a response; this needs a real `go test` to run, in a module
+// that compiles, to produce a gate that exits 0 having run nothing. That is not
+// expressible as a recorded response, so the goldens could never have caught it
+// and the case lives here instead.
+//
+// The bug: `go test` exits 0 when its -run pattern matches nothing, so
+// `go test -run 'TestA && TestB'` and `go test -run TestA` both exit 0 with the
+// same `ok <pkg>` line, differing only in the `[no tests to run]` suffix. An
+// agent gating its next step on `ocaw verify run` exiting 0 was told it had
+// verified something when it had verified nothing.
+func TestVacuousGateIsNotAPass(t *testing.T) {
+	dir := project(t)
+	write(t, filepath.Join(dir, "lib.go"), "package acceptance\n\nfunc Hello() string { return \"hi\" }\n")
+	write(t, filepath.Join(dir, "lib_test.go"),
+		"package acceptance\n\nimport \"testing\"\n\nfunc TestA(t *testing.T) {}\n")
+	mustRun(t, dir, "init")
+	mustRun(t, dir, "task", "add", "--id", "1", "--title", "gated",
+		"--gate", "t=go test -run 'TestA && TestB' ./...")
+
+	r := run(t, dir, "verify", "run", "--task", "1")
+	if r.code == 0 || r.env.Err == nil {
+		t.Fatalf("a gate that ran nothing exited 0; the whole point is that it must not")
+	}
+	if r.env.Err.Code != envelope.CodeVerifyFailed {
+		t.Errorf("code = %q, want %q", r.env.Err.Code, envelope.CodeVerifyFailed)
+	}
+	attempts, _ := r.data["attempts"].([]any)
+	if len(attempts) != 1 {
+		t.Fatalf("got %d attempts, want 1", len(attempts))
+	}
+	att, _ := attempts[0].(map[string]any)
+	if att["status"] != "fail" {
+		t.Errorf("attempt status = %v, want fail", att["status"])
+	}
+	// exit stays 0: the command really did exit 0, and inventing a non-zero code
+	// would be ocaw reporting the command's verdict as its own.
+	if code, _ := att["exit"].(float64); int(code) != 0 {
+		t.Errorf("exit = %v, want 0", att["exit"])
+	}
+	// And the reason has to be in the default payload. `status: fail` beside
+	// `exit: 0` is a contradiction the reader cannot resolve from an output they
+	// did not ask for, and a test that only passes under --verbose would not be
+	// fixing that.
+	reason, _ := att["reason"].(string)
+	if !strings.Contains(reason, "ran nothing") {
+		t.Errorf("reason = %q, want it to say the gate ran nothing", reason)
+	}
+
+	// The contrast that keeps the fix honest: a pattern that matches is a pass.
+	mustRun(t, dir, "task", "set", "1", "--gate", "t=go test -run TestA ./...")
+	if r2 := run(t, dir, "verify", "run", "--task", "1"); r2.code != 0 {
+		t.Errorf("a real pass now fails: %s %s", r2.env.Err.Code, r2.env.Err.Message)
+	}
+}

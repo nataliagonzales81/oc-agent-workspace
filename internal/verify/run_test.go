@@ -258,3 +258,109 @@ func TestATimeoutKillsGrandchildrenToo(t *testing.T) {
 		t.Errorf("Run took %s for a 200ms deadline; a grandchild held the pipe open", elapsed.Round(time.Millisecond))
 	}
 }
+
+// goModule writes a compilable module in a fresh directory, so a gate can be a
+// real `go test` rather than a script that fakes one.
+func goModule(t *testing.T, files map[string]string) string {
+	t.Helper()
+	dir := t.TempDir()
+	files["go.mod"] = "module example.com/p\n\ngo 1.22\n"
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+// A command that exits 0 having done nothing is not a pass. `go test` exits 0
+// when its -run pattern matches nothing, so these two cases are
+// indistinguishable by exit code and by every line except the marker.
+func TestGateThatRanNothingIsNotAPass(t *testing.T) {
+	dir := goModule(t, map[string]string{
+		"lib.go":      "package p\n\nfunc Hello() string { return \"hi\" }\n",
+		"lib_test.go": "package p\n\nimport \"testing\"\n\nfunc TestA(t *testing.T) {}\n",
+	})
+
+	for _, c := range []struct {
+		name string
+		argv []string
+		want Status
+	}{
+		// The bug: exit 0, `ok <pkg>`, and no test ran.
+		{"pattern matches nothing", []string{"go", "test", "-run", "NoSuchTestName", "./..."}, Fail},
+		{"tests actually ran", []string{"go", "test", "-run", "TestA", "./..."}, Pass},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			att := Run(Request{TaskID: "1", Gate: "t", Argv: c.argv, Dir: dir, Timeout: 2 * time.Minute})
+			if att.Status != c.want {
+				t.Fatalf("status = %q, want %q\noutput: %s", att.Status, c.want, att.Output)
+			}
+			if att.Exit == nil {
+				t.Error("exit is nil; the command really did exit, and that is the evidence")
+			}
+			if c.want == Fail && !bytes.Contains(att.Output, []byte("ran nothing")) {
+				t.Errorf("a failed gate must say why\noutput: %s", att.Output)
+			}
+		})
+	}
+}
+
+// `[no test files]` is what every `go test ./...` reports for a package that has
+// no tests. Failing it would fail essentially every real Go project, so the
+// marker list must not contain it. This is the negative case that keeps the
+// narrow fix narrow.
+func TestPackageWithoutTestsIsStillAPass(t *testing.T) {
+	dir := goModule(t, map[string]string{
+		"lib.go": "package p\n\nfunc Hello() string { return \"hi\" }\n",
+	})
+
+	att := Run(Request{TaskID: "1", Gate: "t", Dir: dir, Timeout: 2 * time.Minute,
+		Argv: []string{"go", "test", "./..."}})
+	if !bytes.Contains(att.Output, []byte("no test files")) {
+		t.Skipf("this Go version does not report [no test files] here:\n%s", att.Output)
+	}
+	if att.Status != Pass {
+		t.Fatalf("status = %q, want pass; a package with no tests is not a gap\noutput: %s", att.Status, att.Output)
+	}
+}
+
+func TestNothingRanMarkerTable(t *testing.T) {
+	for _, tc := range []struct {
+		out  string
+		want bool
+	}{
+		{"ok  \tpkg\t0.5s\t[no tests to run]\n", true},
+		{"ok  \tpkg\t0.5s\n", false},
+		{"?   \tpkg\t[no test files]\n", false},
+		{"PASS\nok  \tpkg\t1.2s\n", false},
+		{"", false},
+	} {
+		if _, got := nothingRan([]byte(tc.out)); got != tc.want {
+			t.Errorf("nothingRan(%q) = %v, want %v", tc.out, got, tc.want)
+		}
+	}
+}
+
+// A gate whose own output happens to contain the marker fails, even though it
+// really did the work. That is a false positive, and it is accepted on purpose:
+// a verification tool that fails closed on an ambiguous signal is safer than one
+// that fails open, and the alternative is parsing `go test`'s line format, which
+// couples the gate runner to one toolchain.
+//
+// The case is pinned here so the behaviour is a decision rather than an accident.
+func TestMarkerInARelevantPassStillFails(t *testing.T) {
+	dir := goModule(t, map[string]string{
+		"lib.go":      "package p\n\nfunc Hello() string { return \"hi\" }\n",
+		"lib_test.go": "package p\n\nimport \"testing\"\n\nfunc TestLogs(t *testing.T) {\n\tt.Log(\"server said [no tests to run]\")\n}\n",
+	})
+
+	att := Run(Request{TaskID: "1", Gate: "t", Dir: dir, Timeout: 2 * time.Minute,
+		Argv: []string{"go", "test", "-run", "TestLogs", "-v", "./..."}})
+	if att.Status != Fail {
+		t.Fatalf("status = %q; a substring match is known to fail closed, and this pins that", att.Status)
+	}
+	if !bytes.Contains(att.Output, []byte("ran nothing")) {
+		t.Errorf("output must carry the reason\noutput: %s", att.Output)
+	}
+}
