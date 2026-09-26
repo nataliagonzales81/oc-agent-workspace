@@ -17,6 +17,18 @@ its health, track a task DAG, run verification, and report.
 go install github.com/nataliagonzales81/oc-agent-workspace@latest
 ```
 
+Pin a version if you are writing anything that has to keep working — the payload
+schema is versioned independently of the binary, so `@latest` is a moving target
+in a way most tools are not:
+
+```sh
+go install github.com/nataliagonzales81/oc-agent-workspace@v0.1.0
+```
+
+`ocaw version` reports the version, the Go toolchain it was built with, the
+commit, whether that commit was dirty, and the highest schema `@major` it
+understands. An agent that sees `schema_max: 1` knows what it can rely on.
+
 ## Usage
 
 A session, in order. These run exactly as written — `TestReadmeExamplesRunAsWritten` in
@@ -72,8 +84,24 @@ A failing verification gate is exit 4, after the attempt has been recorded.
 
 v1 is complete: `init`, `doctor`, `status`, `task`, `verify`, `workflow`, `report`, `schema`,
 `version`. The command surface is frozen by a goldens harness; a change to a payload is a
-deliberate act with a diff attached. The binary name `ocaw` is provisional.
+deliberate act with a diff attached, and a breaking one needs a schema `@major` bump.
+
+The binary is named `ocaw` and that name may still change. The module path, the
+repository, and the JSON contract will not.
+
+## Versioning
+
+The binary and the payload schema version separately. `schema_max` in
+`ocaw version` is the highest schema `@major` this build understands; an envelope
+carries its own as `schema: "ocaw/<command>@<major>"`. Adding an optional field
+to a payload is not a breaking change and needs no bump. Renaming a field,
+removing one, or changing a type is, and the goldens will fail until the
+regeneration and the bump are both deliberate:
+
+```sh
+go test ./internal/cli/ -run TestGoldens -update
+```
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE). Changes are in [CHANGELOG.md](CHANGELOG.md).
